@@ -5,46 +5,59 @@ Public research opportunities aggregator. This repo contains a monorepo scaffold
 - `workers/` Python job processors
 - `web/` Next.js public catalogue + admin surfaces
 - `db/` Postgres schema and migrations
-- `handoff/` imported specification and implementation plan
+- `docs/spec/` product specification
+- `docs/roadmap/` implementation roadmap
 
 ## Current Phase
 
-Initial foundation implementation is in progress (Phase 1 from `handoff/IMPLEMENTATION_PLAN_v1.2.md`).
+Initial foundation implementation is in progress (Phase 1 from `docs/roadmap/IMPLEMENTATION_PLAN_v1.2.md`).
 
 ## Quick Start
 
 1. Review specs:
 
 ```bash
-ls handoff
+ls docs/spec docs/roadmap
 ```
 
-2. Run API locally:
+2. Apply schema and seed:
+
+```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sloppy_jobulator \
+bash scripts/apply_db_schema.sh
+```
+
+3. Run API locally:
 
 ```bash
 cd api
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
+export SJ_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sloppy_jobulator
+# Required for human-authenticated routes:
+# export SJ_SUPABASE_URL=https://<project-ref>.supabase.co
+# export SJ_SUPABASE_ANON_KEY=<anon-key>
 uvicorn app.main:app --reload
 ```
 
-3. Run worker scaffold locally:
+4. Run worker scaffold locally:
 
 ```bash
 cd workers
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
+export SJ_WORKER_API_KEY=local-processor-key
 python -m app.main
 ```
 
-4. Run web locally:
+5. Run web locally:
 
 ```bash
-cd web
-npm install
-npm run dev
+fnm use 24.13.0
+pnpm install --dir web
+pnpm --dir web dev
 ```
 
 ## Project Commands
@@ -60,4 +73,5 @@ make typecheck
 
 - Schema baseline lives in `db/schema_v1.sql`.
 - First migration is `db/migrations/0001_schema_v1.sql`.
-- Handoff source docs were copied into local `handoff/` for traceability.
+- Dev machine credentials are seeded in `db/seeds/001_taxonomy.sql`.
+- Node workflows use `fnm` + `pnpm` (`fnm use 24.13.0`).

@@ -21,7 +21,7 @@ For archived plans add:
 - Use `/.agent/execplans/active/EP-TEMPLATE.md` when starting a new plan.
 
 ## Active ExecPlans
-- `EP-2026-02-08__bootstrap-foundation-v1` — `Status:ACTIVE` — `Created:2026-02-08` — `Updated:2026-02-08` — `Path:.agent/execplans/active/EP-2026-02-08__bootstrap-foundation-v1.md` — `Owner:Codex` — `Summary:Bootstrap repo from handoff into runnable API/web/worker/db foundation`.
+- `EP-2026-02-08__bootstrap-foundation-v1` — `Status:ACTIVE` — `Created:2026-02-08` — `Updated:2026-02-08` — `Path:.agent/execplans/active/EP-2026-02-08__bootstrap-foundation-v1.md` — `Owner:Codex` — `Summary:Bootstrap runnable API/web/worker/db foundation and harden with DB-backed auth/persistence + CI gates.`
 
 ## Archived ExecPlans
 - (none yet)

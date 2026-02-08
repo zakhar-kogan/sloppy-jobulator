@@ -13,6 +13,7 @@ class Principal:
     subject: str
     scopes: set[str]
     role: str | None = None
+    actor_id: str | None = None
 
     def require_scopes(self, required: set[str]) -> None:
         missing = required - self.scopes

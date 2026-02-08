@@ -10,6 +10,7 @@
 7. Keep agent instruction layers scoped: root policy in root `AGENTS.md`, local constraints in local `AGENTS.md`.
 8. Enforce framework integrity with lightweight scripted checks and CI.
 9. Maintain compact machine-facing helper docs and an index for recurring failures.
+10. Keep API route handlers thin by centralizing DB transition/idempotency logic in repository methods with explicit error mapping.
 
 ## Anti-patterns
 1. Hidden side effects without tests or receipts.

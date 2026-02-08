@@ -6,12 +6,11 @@ import httpx
 
 
 class JobClient:
-    def __init__(self, base_url: str, module_id: str, api_key: str, module_scopes: str) -> None:
+    def __init__(self, base_url: str, module_id: str, api_key: str) -> None:
         self.base_url = base_url.rstrip("/")
         self.headers = {
             "X-Module-Id": module_id,
             "X-API-Key": api_key,
-            "X-Module-Scopes": module_scopes,
         }
 
     async def get_jobs(self, limit: int = 10) -> list[dict[str, Any]]:

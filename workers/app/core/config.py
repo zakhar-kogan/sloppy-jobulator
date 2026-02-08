@@ -6,8 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     api_base_url: str = "http://localhost:8000"
     module_id: str = "local-processor"
-    api_key: str = "local-dev-key"
-    module_scopes: str = "jobs:read,jobs:write"
+    api_key: str = "local-processor-key"
     poll_interval_seconds: float = 2.0
     max_backoff_seconds: float = 15.0
 

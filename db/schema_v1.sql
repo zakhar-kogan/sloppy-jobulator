@@ -1,5 +1,5 @@
 -- Sloppy Jobulator v1 baseline schema
--- Source: handoff/SPEC_v1.2.md
+-- Source: docs/spec/SPEC_v1.2.md
 
 create extension if not exists pgcrypto;
 

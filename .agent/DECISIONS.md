@@ -23,3 +23,17 @@ Use ADR-lite entries:
 - Decision: Ship initial endpoints and worker loop against in-memory stores while committing the canonical Postgres schema/migration baseline.
 - Why: This gives immediate executable surfaces without blocking on full Supabase wiring.
 - Impact: Near-term iteration speed improves, with explicit follow-up to replace temporary stores with repository-backed persistence.
+
+### D-003 (Keep spec/plan docs in stable docs paths)
+- Status: ACTIVE
+- Date: 2026-02-08
+- Decision: Store primary handoff artifacts in `docs/spec/` and `docs/roadmap/`, and remove the transient `handoff/` directory.
+- Why: Reduces drift between temporary transfer bundles and long-lived repository documentation references.
+- Impact: Internal references remain stable and agent hygiene checks avoid absolute-path transfer remnants.
+
+### D-004 (Standardize Node tooling on fnm + pnpm)
+- Status: ACTIVE
+- Date: 2026-02-08
+- Decision: Use `fnm` for Node version selection (`.node-version`) and `pnpm` for web dependency/install/build/lint/typecheck workflows.
+- Why: Enforces a single Node package manager and reproducible lockfile-based installs across local and CI.
+- Impact: Root `Makefile`, README instructions, and CI web job now run Node tasks via `fnm`/`pnpm`.

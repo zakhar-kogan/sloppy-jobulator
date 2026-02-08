@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - "api/**"
+      - "workers/**"
+      - "web/**"
+      - "db/**"
+      - ".github/workflows/ci.yml"
+      - "Makefile"
+  push:
+    branches:
+      - main
+    paths:
+      - "api/**"
+      - "workers/**"
+      - "web/**"
+      - "db/**"
+      - ".github/workflows/ci.yml"
+      - "Makefile"
+  workflow_dispatch:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install API deps
+        run: pip install -e "./api[dev]"
+
+      - name: API lint
+        run: ruff check api
+
+      - name: API typecheck
+        run: mypy api/app
+
+      - name: API tests
+        run: pytest api/tests
+
+  workers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install worker deps
+        run: pip install -e "./workers[dev]"
+
+      - name: Worker lint
+        run: ruff check workers
+
+      - name: Worker typecheck
+        run: mypy workers/app
+
+      - name: Worker tests
+        run: pytest workers/tests
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install web deps
+        run: pnpm install --dir web --frozen-lockfile
+
+      - name: Web lint
+        run: pnpm --dir web lint
+
+      - name: Web typecheck
+        run: pnpm --dir web typecheck

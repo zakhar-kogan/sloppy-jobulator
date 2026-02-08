@@ -11,7 +11,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 
 ## Scope and Constraints
 - In scope:
-1. Import handoff docs into repo-local `handoff/`.
+1. Keep spec/plan docs repo-local under `docs/spec/` and `docs/roadmap/`.
 2. Create monorepo service layout and baseline implementation files.
 3. Add initial DB schema/migration and seed.
 4. Add starter API endpoints, worker runtime scaffold, and web shell.
@@ -31,12 +31,14 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Add baseline DB schema + migration + seed.
 - [x] Add FastAPI skeleton and worker scaffold.
 - [x] Add Next.js catalogue shell.
-- [ ] Wire API/worker to Postgres and Supabase auth.
-- [ ] Implement discovery/evidence persistence with provenance writes.
+- [x] Wire API/worker to Postgres and Supabase auth.
+- [x] Implement discovery/evidence persistence with provenance writes.
+- [x] Add CI workflow for api/workers/web lint/typecheck/tests gates.
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
-- 2026-02-08: Established local `handoff/` as repo source of truth snapshot.
+- 2026-02-08: Replaced in-memory API persistence/auth stubs with Postgres-backed repository and real credential verification.
+- 2026-02-08: Moved handoff docs into permanent `docs/spec` and `docs/roadmap` locations to remove `handoff/`.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -70,4 +72,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 - Follow-ups:
 1. Replace in-memory stores with Postgres repositories and transaction-safe provenance writes.
 2. Implement machine credential verification against `module_credentials`.
-3. Add CI pipelines and integration tests on discovery->job->posting flow.
+3. Add integration tests on discovery->job->posting flow.

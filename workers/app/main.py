@@ -16,7 +16,6 @@ async def run_worker() -> None:
         base_url=settings.api_base_url,
         module_id=settings.module_id,
         api_key=settings.api_key,
-        module_scopes=settings.module_scopes,
     )
 
     backoff = settings.poll_interval_seconds

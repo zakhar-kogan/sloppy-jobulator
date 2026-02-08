@@ -19,6 +19,6 @@
 4. Human auth and machine auth remain separated from day one.
 
 ## Current Source of Truth
-1. Main spec: `handoff/SPEC_v1.2.md`
+1. Main spec: `docs/spec/SPEC_v1.2.md`
 2. Data/schema docs: `db/schema_v1.sql`
-3. Implementation roadmap: `handoff/IMPLEMENTATION_PLAN_v1.2.md`
+3. Implementation roadmap: `docs/roadmap/IMPLEMENTATION_PLAN_v1.2.md`

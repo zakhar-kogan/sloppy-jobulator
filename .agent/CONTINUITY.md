@@ -13,27 +13,31 @@ In `template` mode, keep this file as scaffold-only.
 
 ## Snapshot
 
-Goal: Bootstrap project foundation from handoff spec with runnable API/web/worker skeletons and baseline DB schema.
-Now: Phase 1 foundation scaffold implemented with local handoff copy, schema migration baseline, and starter endpoints.
-Next: Integrate API/worker with Postgres + Supabase auth and replace in-memory stores.
-Open Questions: exact Supabase project setup and initial module credential bootstrap flow are UNCONFIRMED.
+Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
+Now: API discoveries/evidence/jobs/postings are Postgres-backed; machine credentials validate against `module_credentials`; human auth verifies tokens via Supabase `/auth/v1/user`; handoff docs moved into `docs/`.
+Next: Add integration tests for discovery->job->result flow and wire environment-specific Supabase settings in deployment.
+Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
-- 2026-02-08 `[USER]` Requested implementation start from `/handoff` and approved using `project` mode.
-- 2026-02-08 `[TOOL]` Copied handoff docs into local `handoff/` from sibling repo bundle.
-- 2026-02-08 `[CODE]` Added monorepo scaffold (`api/`, `workers/`, `web/`, `db/`) and bootstrap configs.
-- 2026-02-08 `[CODE]` Added baseline DB schema + migration + seed script.
-- 2026-02-08 `[CODE]` Added FastAPI skeleton endpoints and worker polling scaffold.
+- 2026-02-08 `[CODE]` Replaced in-memory API store with async Postgres repository (`api/app/services/repository.py`) and removed bootstrap store.
+- 2026-02-08 `[CODE]` Wired discovery/evidence/jobs/postings routes to repository methods with DB-backed idempotency and provenance writes.
+- 2026-02-08 `[CODE]` Implemented machine credential validation against `modules` + `module_credentials` and human token verification via Supabase Auth API.
+- 2026-02-08 `[CODE]` Added dev module/credential seed records and aligned worker default API key to seeded processor key.
+- 2026-02-08 `[CODE]` Added `.github/workflows/ci.yml` to run lint/typecheck/tests gates across api/workers/web.
+- 2026-02-08 `[CODE]` Moved handoff docs into `docs/spec/` and `docs/roadmap/`, updated references, and removed `handoff/`.
 
 ## Working set
-- 2026-02-08 `[CODE]` API and workers still use in-memory/job-client bootstrap flow pending DB wiring.
-- 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per handoff spec.
-- 2026-02-08 `[ASSUMPTION]` Build/test/lint/typecheck commands are provisionally mapped via root `Makefile`.
+- 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
+- 2026-02-08 `[CODE]` Node toolchain standardized on `fnm` + `pnpm` with root `.node-version` and `web/pnpm-lock.yaml`.
+- 2026-02-08 `[CODE]` CI currently runs web lint/typecheck (no web test suite exists yet).
 
 ## Decisions
 - 2026-02-08 `[CODE]` D-001 and D-002 active in `.agent/DECISIONS.md`.
+- 2026-02-08 `[CODE]` D-003 added: handoff documents live under `docs/` instead of transient `handoff/`.
 
 ## Receipts
-- 2026-02-08 `[TOOL]` `find .. -maxdepth 3 -type d -name handoff` located `../tmpl-starter/handoff`.
-- 2026-02-08 `[TOOL]` `cp ../tmpl-starter/handoff/* handoff/` imported transfer docs.
-- 2026-02-08 `[TOOL]` Created initial project files in `api/`, `workers/`, `web/`, `db/`, and `docs/`.
+- 2026-02-08 `[TOOL]` `python -m compileall api/app workers/app` succeeded after repository/auth rewiring.
+- 2026-02-08 `[TOOL]` `uv venv .venv && uv pip install -e './api[dev]' -e './workers[dev]'` installed lint/typecheck/test toolchain locally.
+- 2026-02-08 `[TOOL]` `fnm use 24.13.0 && pnpm install --dir web` installed web dependencies and generated `web/pnpm-lock.yaml`.
+- 2026-02-08 `[TOOL]` `make lint && make typecheck && make test && make build` all passed locally.
+- 2026-02-08 `[TOOL]` `bash scripts/agent-hygiene-check.sh --mode project` passed after removing absolute-path source references.

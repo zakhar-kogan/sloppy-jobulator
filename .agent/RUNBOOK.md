@@ -4,18 +4,18 @@
 1. Install dependencies:
 - API: `cd api && python -m venv .venv && source .venv/bin/activate && pip install -e .[dev]`
 - Workers: `cd workers && python -m venv .venv && source .venv/bin/activate && pip install -e .[dev]`
-- Web: `cd web && npm install`
+- Web: `fnm use 24.13.0 && pnpm install --dir web`
 2. Start local services:
 - API: `cd api && uvicorn app.main:app --reload`
 - Worker: `cd workers && python -m app.main`
-- Web: `cd web && npm run dev`
+- Web: `fnm use 24.13.0 && pnpm --dir web dev`
 3. Run app locally: start API + web for browsing, then worker for job processing.
 
 ## Build/test/quality
-1. Build: `python -m compileall api/app workers/app` and `cd web && npm run build`
+1. Build: `python -m compileall api/app workers/app` and `fnm exec --using 24.13.0 pnpm --dir web build`
 2. Test: `cd api && pytest` and `cd workers && pytest`
-3. Lint: `cd api && ruff check app tests` and `cd workers && ruff check app tests` and `cd web && npm run lint`
-4. Typecheck: `cd api && mypy app` and `cd workers && mypy app` and `cd web && npm run typecheck`
+3. Lint: `cd api && ruff check app tests` and `cd workers && ruff check app tests` and `fnm exec --using 24.13.0 pnpm --dir web lint`
+4. Typecheck: `cd api && mypy app` and `cd workers && mypy app` and `fnm exec --using 24.13.0 pnpm --dir web typecheck`
 5. Required pre-finalization checks (fill with concrete commands): `bash scripts/agent-hygiene-check.sh --mode project`
 
 ## Database operations
@@ -41,4 +41,5 @@
 6. Weekly hygiene: prune stale notes, deduplicate conflicting guidance, and update `UNCONFIRMED` commands when known.
 7. Run contract checks: `bash scripts/agent-hygiene-check.sh --mode template|project`.
 8. Run weekly maintenance review: `bash scripts/agent-weekly-review.sh --mode template|project`.
-9. If work references `/handoff`, first verify `handoff/` exists in the repo; if missing, import the agreed source before coding.
+9. Keep spec/roadmap references pointed at `docs/spec/` and `docs/roadmap/`; avoid relying on external handoff folders.
+10. After doc migrations/imports, run a quick absolute-path scan before hygiene/CI (for example, check for machine-local home-directory prefixes).
