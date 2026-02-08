@@ -1,48 +1,63 @@
-# tmpl-starter
+# Sloppy Jobulator
 
-Template for an extremely simple but effective agent workflow with:
-- a stable `/.agent` contract
-- phase-gated execution for substantial tasks
-- mode-aware hygiene checks (`template` vs `project`)
+Public research opportunities aggregator. This repo contains a monorepo scaffold for:
+- `api/` FastAPI control plane
+- `workers/` Python job processors
+- `web/` Next.js public catalogue + admin surfaces
+- `db/` Postgres schema and migrations
+- `handoff/` imported specification and implementation plan
 
-## Repository Mode
+## Current Phase
 
-This repository is maintained in `template` mode.
-
-- `template` mode: scaffold stays sanitized (no live task-state writes in continuity/decisions/notes/helpers/execplans)
-- `project` mode: downstream cloned repos enable full self-improving capture loop
+Initial foundation implementation is in progress (Phase 1 from `handoff/IMPLEMENTATION_PLAN_v1.2.md`).
 
 ## Quick Start
 
-1. Clone/copy this repo as your base.
-2. Fill `UNCONFIRMED` fields in:
-- `AGENTS.md`
-- `/.agent/CONTEXT.md`
-- `/.agent/RUNBOOK.md`
-3. Run checks in template mode:
+1. Review specs:
 
 ```bash
-bash scripts/agent-hygiene-check.sh --mode template
-bash scripts/agent-weekly-review.sh --mode template
+ls handoff
 ```
 
-4. In downstream project repos, use project mode:
+2. Run API locally:
 
 ```bash
-bash scripts/agent-hygiene-check.sh --mode project
-bash scripts/agent-weekly-review.sh --mode project
+cd api
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+uvicorn app.main:app --reload
 ```
 
-## Contract Summary
+3. Run worker scaffold locally:
 
-1. Startup order: `INDEX -> CONTINUITY -> CONTEXT -> WORKFLOW -> helpers/INDEX`
-2. Substantial task flow: `clarify -> plan -> implement -> validate -> capture`
-3. End-of-task capture uses a balanced review:
-- what went wrong + prevention
-- what went right + measurable improvement
-- decision per item: `promote now | pilot backlog | keep local`
+```bash
+cd workers
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+python -m app.main
+```
 
-## Reference Docs
+4. Run web locally:
 
-- Canonical framework guide: `docs/FRAMEWORK_GUIDE.md`
-- Subdirectory policy example: `docs/examples/SUBDIR_AGENTS_EXAMPLE.md`
+```bash
+cd web
+npm install
+npm run dev
+```
+
+## Project Commands
+
+```bash
+make build
+make test
+make lint
+make typecheck
+```
+
+## Notes
+
+- Schema baseline lives in `db/schema_v1.sql`.
+- First migration is `db/migrations/0001_schema_v1.sql`.
+- Handoff source docs were copied into local `handoff/` for traceability.

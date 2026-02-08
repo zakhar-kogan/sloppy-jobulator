@@ -1,0 +1,103 @@
+:root {
+  --bg: #f3f4ef;
+  --surface: #ffffff;
+  --text: #111214;
+  --muted: #667085;
+  --accent: #1d4f2f;
+  --accent-2: #c6f18b;
+  --border: #d6d7d1;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 15% 10%, #d7e8b8 0%, transparent 30%),
+    radial-gradient(circle at 85% 10%, #d8f0f0 0%, transparent 30%),
+    var(--bg);
+  font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+}
+
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 3rem 1.25rem;
+}
+
+.hero {
+  background: linear-gradient(140deg, #fefefe 0%, #eef5e4 100%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 2rem;
+  box-shadow: 0 20px 40px rgba(29, 79, 47, 0.08);
+}
+
+.hero h1 {
+  margin: 0 0 0.5rem;
+  font-size: clamp(1.8rem, 3vw, 2.8rem);
+  line-height: 1.1;
+}
+
+.hero p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.controls {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.control label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.control input,
+.control select {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem 0.75rem;
+  background: var(--surface);
+}
+
+.grid {
+  margin-top: 1.75rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem;
+  background: var(--surface);
+}
+
+.card h3 {
+  margin: 0;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  background: var(--accent-2);
+  color: #1f3e19;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  margin-top: 0.5rem;
+}
