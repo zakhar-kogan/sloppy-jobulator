@@ -34,11 +34,14 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Wire API/worker to Postgres and Supabase auth.
 - [x] Implement discovery/evidence persistence with provenance writes.
 - [x] Add CI workflow for api/workers/web lint/typecheck/tests gates.
+- [x] Add API integration tests for discovery->job claim/result flow and CI Postgres provisioning.
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
 - 2026-02-08: Replaced in-memory API persistence/auth stubs with Postgres-backed repository and real credential verification.
 - 2026-02-08: Moved handoff docs into permanent `docs/spec` and `docs/roadmap` locations to remove `handoff/`.
+- 2026-02-08: Standardized Node workflows on `fnm` + `pnpm` and committed lockfile-backed web installs.
+- 2026-02-08: Added integration coverage for discovery->job flow with CI-managed Postgres service.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -72,4 +75,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 - Follow-ups:
 1. Replace in-memory stores with Postgres repositories and transaction-safe provenance writes.
 2. Implement machine credential verification against `module_credentials`.
-3. Add integration tests on discovery->job->posting flow.
+3. Extend integration coverage from discovery->job flow into posting projection/moderation paths.

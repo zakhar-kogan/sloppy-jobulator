@@ -11,6 +11,7 @@
 8. Enforce framework integrity with lightweight scripted checks and CI.
 9. Maintain compact machine-facing helper docs and an index for recurring failures.
 10. Keep API route handlers thin by centralizing DB transition/idempotency logic in repository methods with explicit error mapping.
+11. For DB-dependent integration tests, allow local skip when DB URL is absent and enforce full coverage through CI-provisioned database services.
 
 ## Anti-patterns
 1. Hidden side effects without tests or receipts.
