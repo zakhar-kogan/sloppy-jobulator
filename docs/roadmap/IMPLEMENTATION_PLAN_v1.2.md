@@ -21,7 +21,7 @@
 | A3 | in_progress | Seed/bootstrap scripts exist; full role bootstrap flow remains incomplete. |
 | B1 | done | FastAPI skeleton and route wiring are in place. |
 | B2 | done | Machine auth validates against `modules` + `module_credentials` with scope checks. |
-| B3 | in_progress | Supabase token verification exists; production role/claim conventions still need finalization. |
+| B3 | in_progress | Human role claims now resolve from trusted Supabase `app_metadata` fields only; production provisioning conventions still need finalization. |
 | C1 | done | Discovery ingest API is DB-backed with idempotency behavior. |
 | C2 | in_progress | Evidence metadata API is DB-backed; object store adapter is not implemented yet. |
 | C3 | done | `extract` job completion now materializes `posting_candidates` + discovery/evidence links with provenance writes. |
@@ -32,7 +32,7 @@
 | E2 | not_started | Redirect resolution async job path is not implemented. |
 | E3 | not_started | Dedupe scorer is not implemented. |
 | E4 | not_started | Merge decision flow is not implemented. |
-| F1 | not_started | Moderation APIs not implemented. |
+| F1 | in_progress | Baseline moderation APIs exist (`GET /candidates`, `PATCH /candidates/{id}`) with role/scope checks; full moderation actions remain pending. |
 | F2 | not_started | Trust-policy publication logic not implemented. |
 | F3 | in_progress | `extract` job completion now projects baseline postings; lifecycle transitions (`stale/archived/closed`) remain pending. |
 | G1 | in_progress | `GET /postings` exists; detail/filter/sort contracts are incomplete. |
@@ -48,7 +48,7 @@
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Integration tests cover discovery/jobs/postings-list, projection path, lease requeue, and retry/dead-letter behavior; moderation pipeline tests pending. |
+| L1 | in_progress | Integration tests cover discovery/jobs/postings-list, projection path, lease requeue, retry/dead-letter, and moderation authz allow/deny paths; full moderation pipeline tests pending. |
 | L2 | not_started | Load/perf testing not implemented. |
 | M1 | in_progress | Quality CI exists (lint/typecheck/tests); full deploy + migration gate pipeline pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
@@ -56,9 +56,9 @@
 ## Next Implementation Steps (Priority Order)
 
 1. Complete `B3 + F1` authorization and moderation baseline.
-- Finalize Supabase role claim contract and enforce role checks.
-- Implement first moderation endpoints (`GET /candidates`, `PATCH /candidates/{id}`).
-- Add authz tests for role and scope denial/allow paths.
+- Finalize production Supabase role provisioning conventions (`app_metadata.role|sj_role|roles[]`) and operator runbook.
+- Extend moderation actions beyond state patching (approve/reject/merge/override semantics).
+- Add integration tests for moderation state transitions and posting lifecycle coupling.
 
 2. Move `G1` from partial to production-ready.
 - Add posting detail endpoint and filter/sort/search pagination behavior.

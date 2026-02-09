@@ -838,6 +838,175 @@ class PostgresRepository:
             json.dumps({"job_id": job_id, "candidate_id": candidate_id, "discovery_id": discovery_id}),
         )
 
+    async def list_candidates(self, limit: int, offset: int, state: str | None) -> list[dict[str, Any]]:
+        pool = await self._get_pool()
+        rows = await pool.fetch(
+            """
+            select
+              pc.id::text as id,
+              pc.state::text as state,
+              pc.dedupe_confidence,
+              pc.risk_flags,
+              pc.extracted_fields,
+              coalesce(
+                array_agg(distinct cd.discovery_id::text) filter (where cd.discovery_id is not null),
+                '{}'
+              ) as discovery_ids,
+              p.id::text as posting_id,
+              pc.created_at,
+              pc.updated_at
+            from posting_candidates pc
+            left join candidate_discoveries cd on cd.candidate_id = pc.id
+            left join postings p on p.candidate_id = pc.id
+            where ($3::text is null or pc.state::text = $3::text)
+            group by pc.id, p.id
+            order by pc.updated_at desc
+            limit $1
+            offset $2
+            """,
+            limit,
+            offset,
+            state,
+        )
+        return [self._candidate_row_to_dict(row) for row in rows]
+
+    async def update_candidate_state(
+        self,
+        *,
+        candidate_id: str,
+        state: str,
+        actor_user_id: str,
+        reason: str | None,
+    ) -> dict[str, Any]:
+        pool = await self._get_pool()
+
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    existing = await conn.fetchrow(
+                        """
+                        select
+                          id::text as id,
+                          state::text as state
+                        from posting_candidates
+                        where id = $1::uuid
+                        for update
+                        """,
+                        candidate_id,
+                    )
+                    if not existing:
+                        raise RepositoryNotFoundError("candidate not found")
+
+                    if state == "published":
+                        has_posting = await conn.fetchval(
+                            """
+                            select 1
+                            from postings
+                            where candidate_id = $1::uuid
+                            limit 1
+                            """,
+                            candidate_id,
+                        )
+                        if not has_posting:
+                            raise RepositoryConflictError("cannot publish candidate without posting projection")
+
+                    await conn.execute(
+                        """
+                        update posting_candidates
+                        set state = $2::candidate_state
+                        where id = $1::uuid
+                        """,
+                        candidate_id,
+                        state,
+                    )
+
+                    if state in {"published", "archived", "closed"}:
+                        posting_status = {
+                            "published": "active",
+                            "archived": "archived",
+                            "closed": "closed",
+                        }[state]
+                        await conn.execute(
+                            """
+                            update postings
+                            set status = $2::posting_status
+                            where candidate_id = $1::uuid
+                            """,
+                            candidate_id,
+                            posting_status,
+                        )
+
+                    row = await conn.fetchrow(
+                        """
+                        select
+                          pc.id::text as id,
+                          pc.state::text as state,
+                          pc.dedupe_confidence,
+                          pc.risk_flags,
+                          pc.extracted_fields,
+                          coalesce(
+                            array_agg(distinct cd.discovery_id::text) filter (where cd.discovery_id is not null),
+                            '{}'
+                          ) as discovery_ids,
+                          p.id::text as posting_id,
+                          pc.created_at,
+                          pc.updated_at
+                        from posting_candidates pc
+                        left join candidate_discoveries cd on cd.candidate_id = pc.id
+                        left join postings p on p.candidate_id = pc.id
+                        where pc.id = $1::uuid
+                        group by pc.id, p.id
+                        """,
+                        candidate_id,
+                    )
+                    await conn.execute(
+                        """
+                        insert into provenance_events (
+                          entity_type,
+                          entity_id,
+                          event_type,
+                          actor_type,
+                          actor_id,
+                          payload
+                        )
+                        values ('posting_candidate', $1::uuid, 'state_changed', 'human', $2::uuid, $3::jsonb)
+                        """,
+                        candidate_id,
+                        actor_user_id,
+                        json.dumps(
+                            {
+                                "from_state": existing["state"],
+                                "to_state": state,
+                                "reason": reason,
+                            }
+                        ),
+                    )
+                    if state in {"published", "archived", "closed"}:
+                        posting_id = row["posting_id"] if row else None
+                        if posting_id:
+                            await conn.execute(
+                                """
+                                insert into provenance_events (
+                                  entity_type,
+                                  entity_id,
+                                  event_type,
+                                  actor_type,
+                                  actor_id,
+                                  payload
+                                )
+                                values ('posting', $1::uuid, 'state_changed', 'human', $2::uuid, $3::jsonb)
+                                """,
+                                posting_id,
+                                actor_user_id,
+                                json.dumps({"candidate_state": state}),
+                            )
+
+                    if not row:
+                        raise RepositoryNotFoundError("candidate not found")
+                    return self._candidate_row_to_dict(row)
+        except (pg_exc.InvalidTextRepresentationError, asyncpg.DataError) as exc:
+            raise RepositoryConflictError("invalid candidate state or id") from exc
+
     async def list_postings(self, limit: int, offset: int) -> list[dict[str, Any]]:
         pool = await self._get_pool()
         rows = await pool.fetch(
@@ -907,6 +1076,28 @@ class PostgresRepository:
             "target_id": row["target_id"],
             "inputs_json": inputs_json,
             "status": row["status"],
+        }
+
+    @staticmethod
+    def _candidate_row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
+        extracted_fields = row["extracted_fields"]
+        if isinstance(extracted_fields, str):
+            try:
+                extracted_fields = json.loads(extracted_fields)
+            except json.JSONDecodeError:
+                extracted_fields = {}
+        if not isinstance(extracted_fields, dict):
+            extracted_fields = {}
+        return {
+            "id": row["id"],
+            "state": row["state"],
+            "dedupe_confidence": float(row["dedupe_confidence"]) if row["dedupe_confidence"] is not None else None,
+            "risk_flags": list(row["risk_flags"] or []),
+            "extracted_fields": extracted_fields,
+            "discovery_ids": list(row["discovery_ids"] or []),
+            "posting_id": row["posting_id"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
         }
 
     def _compute_retry_delay_seconds(self, *, attempt: int) -> int:

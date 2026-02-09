@@ -14,6 +14,7 @@ ROLE_SCOPES: dict[str, set[str]] = {
     "moderator": {"catalog:read", "submission:write", "moderation:read", "moderation:write"},
     "admin": {"catalog:read", "submission:write", "moderation:read", "moderation:write", "admin:write"},
 }
+ALLOWED_ROLES = {"user", "moderator", "admin"}
 
 
 async def get_machine_principal(
@@ -124,16 +125,27 @@ async def _fetch_supabase_user(
 
 
 def _resolve_human_role(user: dict[str, Any]) -> str:
+    # Contract: only trusted app_metadata claims may grant elevated roles.
     app_metadata = user.get("app_metadata")
     if isinstance(app_metadata, dict):
-        role = app_metadata.get("role")
-        if isinstance(role, str) and role:
-            return role
-
-    user_metadata = user.get("user_metadata")
-    if isinstance(user_metadata, dict):
-        role = user_metadata.get("role")
-        if isinstance(role, str) and role:
-            return role
+        for key in ("role", "sj_role"):
+            normalized = _normalize_role(app_metadata.get(key))
+            if normalized:
+                return normalized
+        roles = app_metadata.get("roles")
+        if isinstance(roles, list):
+            for candidate in roles:
+                normalized = _normalize_role(candidate)
+                if normalized:
+                    return normalized
 
     return "user"
+
+
+def _normalize_role(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    role = value.strip().lower()
+    if role in ALLOWED_ROLES:
+        return role
+    return None
