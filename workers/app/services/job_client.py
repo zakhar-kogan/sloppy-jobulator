@@ -46,3 +46,14 @@ class JobClient:
             response = await client.post(f"{self.base_url}/jobs/{job_id}/result", json=payload, headers=self.headers)
             response.raise_for_status()
             return response.json()
+
+    async def reap_expired_jobs(self, limit: int = 100) -> int:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{self.base_url}/jobs/reap-expired",
+                params={"limit": limit},
+                headers=self.headers,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            return int(payload.get("requeued", 0))

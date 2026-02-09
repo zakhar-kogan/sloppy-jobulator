@@ -14,18 +14,18 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `extract` job completion now materializes `posting_candidates`, links candidate discoveries/evidence, projects baseline `postings`, and emits provenance events; DB-backed projection integration tests pass locally with OrbStack.
-Next: Implement `D2` lease reaper + retry/dead-letter transitions, then finalize Supabase role metadata conventions + moderation endpoints.
+Now: `D2` is implemented: API supports expired-lease requeue + bounded retry/dead-letter transitions, workers trigger lease reaping, and DB-backed integration tests cover both paths.
+Next: Finalize Supabase role metadata conventions and ship first moderation endpoints (`GET /candidates`, `PATCH /candidates/{id}`), then harden public postings read contracts.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
-- 2026-02-08 `[CODE]` Added local Postgres compose definition and make targets for DB lifecycle + integration test execution.
-- 2026-02-08 `[CODE]` Expanded API integration tests to cover `/postings` DB-read path in addition to discovery/job flow.
-- 2026-02-08 `[CODE]` Switched API app DB pool cleanup from deprecated `on_event` to lifespan teardown to stabilize integration test client lifecycle.
-- 2026-02-08 `[CODE]` Added `scripts/reset_db.sh` and updated `scripts/apply_db_schema.sh` fallback + `ON_ERROR_STOP` behavior for host-without-psql workflows.
-- 2026-02-08 `[TOOL]` Verified full local compose-backed integration run passes (`db-up -> db-reset -> test-integration -> db-down`).
-- 2026-02-09 `[CODE]` Added `extract` job projection flow in API repository to materialize candidates/postings with candidate/posting provenance events.
-- 2026-02-09 `[CODE]` Extended DB integration test coverage to assert discovery -> claimed job -> done result -> projected posting behavior.
+- 2026-02-08 `[CODE]` Added local Postgres compose workflow + reset/apply script fallbacks (`make db-up/reset/test-integration/db-down`) for host-without-psql environments.
+- 2026-02-08 `[CODE]` Switched API DB pool cleanup to lifespan teardown for stable integration test lifecycle.
+- 2026-02-08 `[CODE]` Extended API integration coverage to `/postings` DB-read path.
+- 2026-02-09 `[CODE]` Added `extract` result projection into candidates/postings with provenance writes.
+- 2026-02-09 `[CODE]` Extended integration coverage to assert discovery -> claimed job -> done result -> projected posting flow.
+- 2026-02-09 `[CODE]` Added D2 API reliability transitions: lease reaper endpoint + bounded retry/dead-letter resolution for failed results.
+- 2026-02-09 `[CODE]` Updated worker loop to periodically trigger lease reaping and submit `failed` job results on execution exceptions.
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
@@ -42,3 +42,5 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-08 `[TOOL]` `make lint && make typecheck && make test && make build` and `bash scripts/agent-hygiene-check.sh --mode project` passed.
 - 2026-02-09 `[TOOL]` `uv run --project api --extra dev ruff check ...` and `uv run --project api --extra dev mypy api/app/services/repository.py` passed.
 - 2026-02-09 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -> make db-down` passed (3/3 integration tests).
+- 2026-02-09 `[TOOL]` `uv run --project workers --extra dev pytest workers/tests` passed (`2/2`).
+- 2026-02-09 `[TOOL]` `SJ_DATABASE_URL=... SJ_JOB_RETRY_BASE_SECONDS=0 uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py` passed (`5/5`, includes D2 cases).

@@ -20,3 +20,7 @@ class ResultRequest(BaseModel):
     result_json: dict[str, Any] | None = None
     error_json: dict[str, Any] | None = None
     status: str
+
+
+class LeaseReapOut(BaseModel):
+    requeued: int

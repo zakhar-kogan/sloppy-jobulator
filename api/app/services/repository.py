@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any
 
@@ -41,10 +41,21 @@ class MachineCredentialRecord:
 
 
 class PostgresRepository:
-    def __init__(self, database_url: str | None, min_pool_size: int, max_pool_size: int) -> None:
+    def __init__(
+        self,
+        database_url: str | None,
+        min_pool_size: int,
+        max_pool_size: int,
+        job_max_attempts: int,
+        job_retry_base_seconds: int,
+        job_retry_max_seconds: int,
+    ) -> None:
         self.database_url = database_url
         self.min_pool_size = min_pool_size
         self.max_pool_size = max_pool_size
+        self.job_max_attempts = max(1, job_max_attempts)
+        self.job_retry_base_seconds = max(0, job_retry_base_seconds)
+        self.job_retry_max_seconds = max(0, job_retry_max_seconds)
         self._pool: asyncpg.Pool | None = None
 
     async def close(self) -> None:
@@ -383,6 +394,56 @@ class PostgresRepository:
         except (pg_exc.InvalidTextRepresentationError, asyncpg.DataError) as exc:
             raise RepositoryNotFoundError("job not found") from exc
 
+    async def requeue_expired_claimed_jobs(self, module_db_id: str, limit: int) -> int:
+        pool = await self._get_pool()
+        bounded_limit = max(1, min(limit, 1000))
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                rows = await conn.fetch(
+                    """
+                    with expired as (
+                      select id
+                      from jobs
+                      where status = 'claimed'
+                        and lease_expires_at is not null
+                        and lease_expires_at <= now()
+                      order by lease_expires_at asc
+                      limit $1
+                      for update skip locked
+                    )
+                    update jobs j
+                    set
+                      status = 'queued',
+                      locked_by_module_id = null,
+                      locked_at = null,
+                      lease_expires_at = null,
+                      next_run_at = now()
+                    from expired e
+                    where j.id = e.id
+                    returning j.id::text as id
+                    """,
+                    bounded_limit,
+                )
+                for row in rows:
+                    await conn.execute(
+                        """
+                        insert into provenance_events (
+                          entity_type,
+                          entity_id,
+                          event_type,
+                          actor_type,
+                          actor_id,
+                          payload
+                        )
+                        values ('job', $1::uuid, 'lease_requeued', 'machine', $2::uuid, $3::jsonb)
+                        """,
+                        row["id"],
+                        module_db_id,
+                        json.dumps({"reason": "lease_expired"}),
+                    )
+                return len(rows)
+
     async def submit_job_result(
         self,
         job_id: str,
@@ -396,19 +457,57 @@ class PostgresRepository:
         try:
             async with pool.acquire() as conn:
                 async with conn.transaction():
+                    claimed = await conn.fetchrow(
+                        """
+                        select
+                          id::text as id,
+                          kind::text as kind,
+                          target_type,
+                          target_id::text as target_id,
+                          inputs_json,
+                          status::text as status,
+                          locked_by_module_id::text as locked_by,
+                          attempt
+                        from jobs
+                        where id = $1::uuid
+                        for update
+                        """,
+                        job_id,
+                    )
+
+                    if not claimed:
+                        raise RepositoryNotFoundError("job not found")
+                    if claimed["status"] != "claimed":
+                        raise RepositoryConflictError("job is not in claimed state")
+                    if claimed["locked_by"] != module_db_id:
+                        raise RepositoryForbiddenError("job claimed by another module")
+
+                    attempt = int(claimed["attempt"])
+                    next_run_at: datetime | None = None
+                    requested_status = status
+                    resolved_status = status
+                    retry_delay_seconds: int | None = None
+
+                    if requested_status == "failed":
+                        if attempt >= self.job_max_attempts:
+                            resolved_status = "dead_letter"
+                        else:
+                            retry_delay_seconds = self._compute_retry_delay_seconds(attempt=attempt)
+                            next_run_at = datetime.now(timezone.utc) + timedelta(seconds=retry_delay_seconds)
+                            resolved_status = "queued"
+
                     row = await conn.fetchrow(
                         """
                         update jobs
                         set
-                          status = $3::job_status,
-                          result_json = $4::jsonb,
-                          error_json = $5::jsonb,
+                          status = $2::job_status,
+                          result_json = $3::jsonb,
+                          error_json = $4::jsonb,
                           locked_by_module_id = null,
                           locked_at = null,
-                          lease_expires_at = null
+                          lease_expires_at = null,
+                          next_run_at = coalesce($5::timestamptz, next_run_at)
                         where id = $1::uuid
-                          and status = 'claimed'
-                          and locked_by_module_id = $2::uuid
                         returning
                           id::text as id,
                           kind::text as kind,
@@ -418,22 +517,11 @@ class PostgresRepository:
                           status::text as status
                         """,
                         job_id,
-                        module_db_id,
-                        status,
+                        resolved_status,
                         json.dumps(result_json) if result_json is not None else None,
                         json.dumps(error_json) if error_json is not None else None,
+                        next_run_at,
                     )
-
-                    if not row:
-                        existing = await conn.fetchrow(
-                            "select id::text as id, status::text as status, locked_by_module_id::text as locked_by from jobs where id = $1::uuid",
-                            job_id,
-                        )
-                        if not existing:
-                            raise RepositoryNotFoundError("job not found")
-                        if existing["locked_by"] != module_db_id:
-                            raise RepositoryForbiddenError("job claimed by another module")
-                        raise RepositoryConflictError("job is not in claimed state")
 
                     if (
                         row["status"] == "done"
@@ -463,8 +551,56 @@ class PostgresRepository:
                         """,
                         row["id"],
                         module_db_id,
-                        json.dumps({"status": status}),
+                        json.dumps(
+                            {
+                                "requested_status": requested_status,
+                                "resolved_status": resolved_status,
+                                "attempt": attempt,
+                                "max_attempts": self.job_max_attempts,
+                                "retry_delay_seconds": retry_delay_seconds,
+                            }
+                        ),
                     )
+                    if requested_status == "failed" and resolved_status == "queued" and retry_delay_seconds is not None:
+                        await conn.execute(
+                            """
+                            insert into provenance_events (
+                              entity_type,
+                              entity_id,
+                              event_type,
+                              actor_type,
+                              actor_id,
+                              payload
+                            )
+                            values ('job', $1::uuid, 'retry_scheduled', 'machine', $2::uuid, $3::jsonb)
+                            """,
+                            row["id"],
+                            module_db_id,
+                            json.dumps(
+                                {
+                                    "attempt": attempt,
+                                    "max_attempts": self.job_max_attempts,
+                                    "retry_delay_seconds": retry_delay_seconds,
+                                }
+                            ),
+                        )
+                    elif requested_status == "failed" and resolved_status == "dead_letter":
+                        await conn.execute(
+                            """
+                            insert into provenance_events (
+                              entity_type,
+                              entity_id,
+                              event_type,
+                              actor_type,
+                              actor_id,
+                              payload
+                            )
+                            values ('job', $1::uuid, 'dead_lettered', 'machine', $2::uuid, $3::jsonb)
+                            """,
+                            row["id"],
+                            module_db_id,
+                            json.dumps({"attempt": attempt, "max_attempts": self.job_max_attempts}),
+                        )
                     return self._job_row_to_dict(row)
         except (pg_exc.InvalidTextRepresentationError, asyncpg.DataError) as exc:
             raise RepositoryNotFoundError("job not found") from exc
@@ -773,6 +909,13 @@ class PostgresRepository:
             "status": row["status"],
         }
 
+    def _compute_retry_delay_seconds(self, *, attempt: int) -> int:
+        if self.job_retry_base_seconds <= 0:
+            return 0
+        multiplier = max(0, attempt - 1)
+        delay = self.job_retry_base_seconds * (2**multiplier)
+        return min(delay, self.job_retry_max_seconds)
+
     @staticmethod
     def _coerce_text(value: Any) -> str | None:
         if value is None:
@@ -897,4 +1040,7 @@ def get_repository() -> PostgresRepository:
         database_url=settings.database_url,
         min_pool_size=settings.database_pool_min_size,
         max_pool_size=settings.database_pool_max_size,
+        job_max_attempts=settings.job_max_attempts,
+        job_retry_base_seconds=settings.job_retry_base_seconds,
+        job_retry_max_seconds=settings.job_retry_max_seconds,
     )

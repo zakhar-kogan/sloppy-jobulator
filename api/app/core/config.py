@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     database_url: str | None = None
     database_pool_min_size: int = 1
     database_pool_max_size: int = 10
+    job_max_attempts: int = 3
+    job_retry_base_seconds: int = 30
+    job_retry_max_seconds: int = 600
     supabase_url: str | None = None
     supabase_anon_key: str | None = None
     auth_timeout_seconds: float = 5.0

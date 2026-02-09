@@ -46,6 +46,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-08: Added local compose + make commands for integration DB lifecycle and expanded integration tests to `/postings`.
 - 2026-02-08: Hardened local DB scripts for environments without host `psql` and stabilized API test lifecycle with lifespan-managed repository cleanup.
 - 2026-02-09: Materialized `extract` job results into candidates/postings with provenance writes and DB-backed integration assertions.
+- 2026-02-09: Completed D2 reliability baseline with API lease reaper + retry/dead-letter transitions and worker-triggered reaper loop.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -77,5 +78,5 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Implement durable lease reaper/retry/dead-letter behavior for claimed jobs (`D2`) and add integration coverage.
-2. Finalize environment-specific Supabase auth role mapping conventions for production and wire first moderation APIs.
+1. Finalize environment-specific Supabase auth role mapping conventions for production and wire first moderation APIs.
+2. Move public postings API from list-only to detail/filter/sort contract coverage.

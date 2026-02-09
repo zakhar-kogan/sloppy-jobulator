@@ -26,7 +26,7 @@
 | C2 | in_progress | Evidence metadata API is DB-backed; object store adapter is not implemented yet. |
 | C3 | done | `extract` job completion now materializes `posting_candidates` + discovery/evidence links with provenance writes. |
 | D1 | done | Job ledger API (`GET/claim/result`) is DB-backed. |
-| D2 | in_progress | Worker backoff loop exists; durable lease reaper scheduler/requeue policy still incomplete. |
+| D2 | done | Expired-lease requeue endpoint exists and workers trigger it periodically; failed results now follow bounded retry then dead-letter transitions. |
 | D3 | in_progress | Worker scaffold exists; structured logs/OTel and richer execution semantics are pending. |
 | E1 | in_progress | Base URL normalization/hash logic exists; per-domain override support is pending. |
 | E2 | not_started | Redirect resolution async job path is not implemented. |
@@ -48,28 +48,23 @@
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Integration tests cover discovery/jobs/postings-list and discovery->job-result->posting projection; moderation pipeline tests pending. |
+| L1 | in_progress | Integration tests cover discovery/jobs/postings-list, projection path, lease requeue, and retry/dead-letter behavior; moderation pipeline tests pending. |
 | L2 | not_started | Load/perf testing not implemented. |
 | M1 | in_progress | Quality CI exists (lint/typecheck/tests); full deploy + migration gate pipeline pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
 
 ## Next Implementation Steps (Priority Order)
 
-1. Complete `D2` durable execution reliability.
-- Implement lease reaper over DB jobs (requeue expired claimed jobs).
-- Add bounded retry / attempt / dead-letter policy with explicit transitions.
-- Add integration coverage for expired leases and terminal failure paths.
-
-2. Complete `B3 + F1` authorization and moderation baseline.
+1. Complete `B3 + F1` authorization and moderation baseline.
 - Finalize Supabase role claim contract and enforce role checks.
 - Implement first moderation endpoints (`GET /candidates`, `PATCH /candidates/{id}`).
 - Add authz tests for role and scope denial/allow paths.
 
-3. Move `G1` from partial to production-ready.
+2. Move `G1` from partial to production-ready.
 - Add posting detail endpoint and filter/sort/search pagination behavior.
 - Add API contract tests for query correctness and response stability.
 
-4. Strengthen `M1 + L1` delivery safety.
+3. Strengthen `M1 + L1` delivery safety.
 - Keep DB-backed integration tests required in CI.
 - Split fast vs integration test jobs and document required branch checks.
 

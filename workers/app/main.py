@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import random
-from datetime import datetime, timezone
+import time
 
 from app.core.config import get_settings
 from app.jobs.executor import execute_job
-from app.jobs.lease_reaper import should_requeue
 from app.services.job_client import JobClient
 
 
@@ -19,20 +18,34 @@ async def run_worker() -> None:
     )
 
     backoff = settings.poll_interval_seconds
+    last_reap_at = 0.0
 
     while True:
         try:
+            now = time.monotonic()
+            if now - last_reap_at >= settings.lease_reaper_interval_seconds:
+                requeued = await client.reap_expired_jobs(limit=settings.lease_reaper_batch_size)
+                if requeued:
+                    print(f"requeued expired leases: {requeued}")
+                last_reap_at = now
+
             jobs = await client.get_jobs(limit=5)
             if not jobs:
                 await asyncio.sleep(settings.poll_interval_seconds)
                 continue
 
             for job in jobs:
-                if should_requeue(job, now=datetime.now(timezone.utc)):
+                claimed = await client.claim_job(job["id"], lease_seconds=settings.claim_lease_seconds)
+                try:
+                    result = await execute_job(claimed)
+                except Exception as exc:  # pragma: no cover - bootstrap robustness
+                    await client.submit_result(
+                        claimed["id"],
+                        status="failed",
+                        error_json={"error": str(exc)},
+                    )
                     continue
 
-                claimed = await client.claim_job(job["id"], lease_seconds=120)
-                result = await execute_job(claimed)
                 await client.submit_result(claimed["id"], status="done", result_json=result)
 
             backoff = settings.poll_interval_seconds

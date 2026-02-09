@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     api_key: str = "local-processor-key"
     poll_interval_seconds: float = 2.0
     max_backoff_seconds: float = 15.0
+    claim_lease_seconds: int = 120
+    lease_reaper_interval_seconds: float = 15.0
+    lease_reaper_batch_size: int = 100
 
     model_config = SettingsConfigDict(env_prefix="SJ_WORKER_", extra="ignore")
 

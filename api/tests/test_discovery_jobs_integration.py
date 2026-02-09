@@ -213,6 +213,177 @@ def test_discovery_idempotency_does_not_duplicate_job(api_client: TestClient) ->
     assert jobs[0]["target_id"] == first_discovery_id
 
 
+def test_expired_claimed_jobs_are_requeued(api_client: TestClient, database_url: str) -> None:
+    discovery_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-expired-lease",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "https://example.edu/jobs/expired-lease",
+            "title_hint": "Lease Expiry Test Posting",
+            "text_hint": "Lease expiry handling",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert discovery_response.status_code == 202
+
+    jobs_response = api_client.get("/jobs", headers=PROCESSOR_HEADERS)
+    assert jobs_response.status_code == 200
+    jobs = jobs_response.json()
+    assert len(jobs) == 1
+    job_id = jobs[0]["id"]
+
+    claim_response = api_client.post(
+        f"/jobs/{job_id}/claim",
+        json={"lease_seconds": 120},
+        headers=PROCESSOR_HEADERS,
+    )
+    assert claim_response.status_code == 200
+
+    _run(
+        _execute(
+            database_url,
+            "update jobs set lease_expires_at = now() - interval '5 minutes' where id = $1::uuid",
+            job_id,
+        )
+    )
+
+    reap_response = api_client.post(
+        "/jobs/reap-expired",
+        params={"limit": 10},
+        headers=PROCESSOR_HEADERS,
+    )
+    assert reap_response.status_code == 200
+    assert reap_response.json()["requeued"] == 1
+
+    queued_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from jobs
+            where id = $1::uuid
+              and status = 'queued'
+              and locked_by_module_id is null
+              and lease_expires_at is null
+            """,
+            job_id,
+        )
+    )
+    assert queued_count == 1
+
+    lease_requeue_event_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from provenance_events
+            where entity_type = 'job'
+              and entity_id = $1::uuid
+              and event_type = 'lease_requeued'
+            """,
+            job_id,
+        )
+    )
+    assert lease_requeue_event_count == 1
+
+    reclaim_response = api_client.post(
+        f"/jobs/{job_id}/claim",
+        json={"lease_seconds": 120},
+        headers=PROCESSOR_HEADERS,
+    )
+    assert reclaim_response.status_code == 200
+    assert reclaim_response.json()["status"] == "claimed"
+
+
+def test_failed_results_retry_then_dead_letter(api_client: TestClient, database_url: str) -> None:
+    discovery_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-retry-policy",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "https://example.edu/jobs/retry-policy",
+            "title_hint": "Retry Policy Posting",
+            "text_hint": "Retry and dead letter handling",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert discovery_response.status_code == 202
+
+    jobs_response = api_client.get("/jobs", headers=PROCESSOR_HEADERS)
+    assert jobs_response.status_code == 200
+    jobs = jobs_response.json()
+    assert len(jobs) == 1
+    job_id = jobs[0]["id"]
+
+    expected_statuses = ["queued", "queued", "dead_letter"]
+    for attempt, expected_status in enumerate(expected_statuses, start=1):
+        claim_response = api_client.post(
+            f"/jobs/{job_id}/claim",
+            json={"lease_seconds": 120},
+            headers=PROCESSOR_HEADERS,
+        )
+        assert claim_response.status_code == 200
+        assert claim_response.json()["status"] == "claimed"
+
+        result_response = api_client.post(
+            f"/jobs/{job_id}/result",
+            json={
+                "status": "failed",
+                "error_json": {"reason": "integration-failure", "attempt": attempt},
+            },
+            headers=PROCESSOR_HEADERS,
+        )
+        assert result_response.status_code == 200
+        assert result_response.json()["status"] == expected_status
+
+        if expected_status == "queued":
+            _run(_execute(database_url, "update jobs set next_run_at = now() where id = $1::uuid", job_id))
+
+    dead_letter_count = _run(
+        _fetchval(
+            database_url,
+            "select count(*) from jobs where id = $1::uuid and status = 'dead_letter'",
+            job_id,
+        )
+    )
+    assert dead_letter_count == 1
+
+    retry_event_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from provenance_events
+            where entity_type = 'job'
+              and entity_id = $1::uuid
+              and event_type = 'retry_scheduled'
+            """,
+            job_id,
+        )
+    )
+    assert retry_event_count == 2
+
+    dead_letter_event_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from provenance_events
+            where entity_type = 'job'
+              and entity_id = $1::uuid
+              and event_type = 'dead_lettered'
+            """,
+            job_id,
+        )
+    )
+    assert dead_letter_event_count == 1
+
+
 def test_postings_list_reads_from_database(api_client: TestClient, database_url: str) -> None:
     posting_id = _run(
         _fetchval(
@@ -280,5 +451,13 @@ async def _fetchval(database_url: str, query: str, *args: Any) -> Any:
     conn = await asyncpg.connect(database_url)
     try:
         return await conn.fetchval(query, *args)
+    finally:
+        await conn.close()
+
+
+async def _execute(database_url: str, query: str, *args: Any) -> None:
+    conn = await asyncpg.connect(database_url)
+    try:
+        await conn.execute(query, *args)
     finally:
         await conn.close()
