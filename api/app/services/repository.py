@@ -40,6 +40,16 @@ class MachineCredentialRecord:
     key_hash: str
 
 
+@dataclass(slots=True)
+class SourceTrustPolicyRecord:
+    source_key: str
+    trust_level: str
+    auto_publish: bool
+    requires_moderation: bool
+    rules_json: dict[str, Any]
+    matched_fallback: bool
+
+
 class PostgresRepository:
     def __init__(
         self,
@@ -617,14 +627,17 @@ class PostgresRepository:
         discovery = await conn.fetchrow(
             """
             select
-              id::text as id,
-              url,
-              normalized_url,
-              canonical_hash,
-              title_hint,
-              metadata
-            from discoveries
-            where id = $1::uuid
+              d.id::text as id,
+              d.url,
+              d.normalized_url,
+              d.canonical_hash,
+              d.title_hint,
+              d.metadata,
+              m.module_id as origin_module_id,
+              m.trust_level::text as origin_module_trust_level
+            from discoveries d
+            left join modules m on m.id = d.origin_module_id
+            where d.id = $1::uuid
             """,
             discovery_id,
         )
@@ -656,15 +669,46 @@ class PostgresRepository:
         canonical_hash = self._coerce_text(projection_payload.get("canonical_hash")) or self._coerce_text(
             discovery["canonical_hash"]
         )
-        posting_status = self._coerce_posting_status(projection_payload.get("status"), default="active")
+        dedupe_confidence = self._coerce_float(extraction.get("dedupe_confidence"))
+        risk_flags = self._coerce_text_list(extraction.get("risk_flags"))
+        source_key_hint = self._resolve_source_key_hint(
+            extraction=extraction,
+            projection_payload=projection_payload,
+            discovery_metadata=discovery_metadata,
+        )
+        origin_module_id = self._coerce_text(discovery["origin_module_id"]) or "unknown-module"
+        origin_module_trust_level = self._coerce_text(discovery["origin_module_trust_level"]) or "untrusted"
+        trust_policy = await self._resolve_source_trust_policy(
+            conn=conn,
+            source_key_hint=source_key_hint,
+            module_id=origin_module_id,
+            module_trust_level=origin_module_trust_level,
+        )
 
         can_project_posting = bool(
             has_projection_signal and title and organization_name and canonical_url and normalized_url and canonical_hash
         )
-        default_state = "published" if can_project_posting else "processed"
+        (
+            default_state,
+            default_posting_status,
+            trust_policy_payload,
+        ) = self._resolve_publish_decision(
+            can_project_posting=can_project_posting,
+            trust_policy=trust_policy,
+            dedupe_confidence=dedupe_confidence,
+            risk_flags=risk_flags,
+        )
         candidate_state = self._coerce_candidate_state(extraction.get("candidate_state"), default=default_state)
         if not can_project_posting and candidate_state == "published":
             candidate_state = "processed"
+        if can_project_posting and candidate_state == "published" and default_state != "published":
+            candidate_state = "needs_review"
+
+        posting_status = (
+            self._coerce_posting_status(projection_payload.get("status"), default=default_posting_status)
+            if candidate_state == "published"
+            else "archived"
+        )
 
         candidate_id = await conn.fetchval(
             """
@@ -680,9 +724,9 @@ class PostgresRepository:
             """,
             candidate_state,
             canonical_hash,
-            self._coerce_float(extraction.get("dedupe_confidence")),
+            dedupe_confidence,
             json.dumps(extraction),
-            self._coerce_text_list(extraction.get("risk_flags")),
+            risk_flags,
         )
 
         await conn.execute(
@@ -720,6 +764,30 @@ class PostgresRepository:
             candidate_id,
             actor_module_db_id,
             json.dumps({"job_id": job_id, "discovery_id": discovery_id, "state": candidate_state}),
+        )
+        await conn.execute(
+            """
+            insert into provenance_events (
+              entity_type,
+              entity_id,
+              event_type,
+              actor_type,
+              actor_id,
+              payload
+            )
+            values ('posting_candidate', $1::uuid, 'trust_policy_applied', 'machine', $2::uuid, $3::jsonb)
+            """,
+            candidate_id,
+            actor_module_db_id,
+            json.dumps(
+                {
+                    "job_id": job_id,
+                    "discovery_id": discovery_id,
+                    "candidate_state": candidate_state,
+                    "posting_status": posting_status,
+                    **trust_policy_payload,
+                }
+            ),
         )
 
         if not can_project_posting:
@@ -1754,6 +1822,169 @@ class PostgresRepository:
             "source_refs",
         }
         return any(key in projection_payload for key in projection_keys)
+
+    @staticmethod
+    def _resolve_source_key_hint(
+        *,
+        extraction: dict[str, Any],
+        projection_payload: dict[str, Any],
+        discovery_metadata: dict[str, Any],
+    ) -> str | None:
+        for candidate in (
+            projection_payload.get("source_key"),
+            extraction.get("source_key"),
+            discovery_metadata.get("source_key"),
+        ):
+            if isinstance(candidate, str):
+                normalized = candidate.strip()
+                if normalized:
+                    return normalized
+        return None
+
+    async def _resolve_source_trust_policy(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        source_key_hint: str | None,
+        module_id: str,
+        module_trust_level: str,
+    ) -> SourceTrustPolicyRecord:
+        normalized_trust_level = module_trust_level if module_trust_level in {"trusted", "semi_trusted", "untrusted"} else "untrusted"
+        policy_lookup_order: list[str] = []
+        if source_key_hint:
+            policy_lookup_order.append(source_key_hint)
+        if module_id:
+            policy_lookup_order.append(f"module:{module_id}")
+        policy_lookup_order.append(f"default:{normalized_trust_level}")
+
+        row = await conn.fetchrow(
+            """
+            select
+              source_key,
+              trust_level::text as trust_level,
+              auto_publish,
+              requires_moderation,
+              rules_json
+            from source_trust_policy
+            where enabled = true
+              and source_key = any($1::text[])
+            order by array_position($1::text[], source_key)
+            limit 1
+            """,
+            policy_lookup_order,
+        )
+        if row:
+            rules_json = row["rules_json"]
+            if isinstance(rules_json, str):
+                try:
+                    rules_json = json.loads(rules_json)
+                except json.JSONDecodeError:
+                    rules_json = {}
+            if not isinstance(rules_json, dict):
+                rules_json = {}
+            return SourceTrustPolicyRecord(
+                source_key=row["source_key"],
+                trust_level=row["trust_level"],
+                auto_publish=bool(row["auto_publish"]),
+                requires_moderation=bool(row["requires_moderation"]),
+                rules_json=rules_json,
+                matched_fallback=False,
+            )
+
+        return SourceTrustPolicyRecord(
+            source_key=f"default:{normalized_trust_level}",
+            trust_level=normalized_trust_level,
+            auto_publish=normalized_trust_level == "trusted",
+            requires_moderation=normalized_trust_level != "trusted",
+            rules_json={},
+            matched_fallback=True,
+        )
+
+    def _resolve_publish_decision(
+        self,
+        *,
+        can_project_posting: bool,
+        trust_policy: SourceTrustPolicyRecord,
+        dedupe_confidence: float | None,
+        risk_flags: list[str],
+    ) -> tuple[str, str, dict[str, Any]]:
+        rules_json = trust_policy.rules_json if isinstance(trust_policy.rules_json, dict) else {}
+        min_confidence = self._coerce_float(rules_json.get("min_confidence"))
+        meets_confidence = min_confidence is None or (
+            dedupe_confidence is not None and dedupe_confidence >= min_confidence
+        )
+        has_conflict_flag = any("conflict" in flag.lower() for flag in risk_flags)
+        require_human_review = self._coerce_bool(rules_json.get("require_human_review"))
+        allow_if_no_conflicts = self._coerce_bool(rules_json.get("allow_if_no_conflicts"))
+
+        should_auto_publish = False
+        reason = "insufficient_projection_data"
+
+        if can_project_posting:
+            trust_level = trust_policy.trust_level
+            if trust_level == "trusted":
+                should_auto_publish = (
+                    trust_policy.auto_publish
+                    and not trust_policy.requires_moderation
+                    and meets_confidence
+                    and not require_human_review
+                )
+                if should_auto_publish:
+                    reason = "trusted_auto_publish"
+                elif not trust_policy.auto_publish:
+                    reason = "policy_auto_publish_disabled"
+                elif trust_policy.requires_moderation:
+                    reason = "policy_requires_moderation"
+                elif not meets_confidence:
+                    reason = "below_min_confidence"
+                else:
+                    reason = "rule_requires_human_review"
+            elif trust_level == "semi_trusted":
+                should_auto_publish = (
+                    trust_policy.auto_publish
+                    and meets_confidence
+                    and not require_human_review
+                    and not has_conflict_flag
+                    and (not trust_policy.requires_moderation or allow_if_no_conflicts)
+                )
+                if should_auto_publish:
+                    reason = "semi_trusted_auto_publish"
+                elif has_conflict_flag:
+                    reason = "semi_trusted_conflict_flag"
+                elif trust_policy.requires_moderation and not allow_if_no_conflicts:
+                    reason = "policy_requires_moderation"
+                elif not meets_confidence:
+                    reason = "below_min_confidence"
+                elif not trust_policy.auto_publish:
+                    reason = "policy_auto_publish_disabled"
+                else:
+                    reason = "rule_requires_human_review"
+            else:
+                reason = "untrusted_requires_moderation"
+
+        candidate_state = "processed"
+        posting_status = "archived"
+        if can_project_posting:
+            candidate_state = "published" if should_auto_publish else "needs_review"
+            posting_status = "active" if should_auto_publish else "archived"
+
+        return (
+            candidate_state,
+            posting_status,
+            {
+                "source_key": trust_policy.source_key,
+                "trust_level": trust_policy.trust_level,
+                "auto_publish": trust_policy.auto_publish,
+                "requires_moderation": trust_policy.requires_moderation,
+                "rules_json": rules_json,
+                "matched_fallback": trust_policy.matched_fallback,
+                "dedupe_confidence": dedupe_confidence,
+                "min_confidence": min_confidence,
+                "meets_confidence": meets_confidence,
+                "has_conflict_flag": has_conflict_flag,
+                "reason": reason,
+            },
+        )
 
     @staticmethod
     def _coerce_candidate_state(value: Any, *, default: str) -> str:

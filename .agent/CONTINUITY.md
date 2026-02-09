@@ -14,16 +14,16 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `M1 + L1` CI safety gate split is live: API fast checks and DB-backed integration checks run as separate required CI jobs; branch-check names are documented alongside existing `B3 + F1 + G1` hardened contracts.
-Next: Start `A3/F2` policy/bootstrap automation.
-Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
+Now: `A3/F2` baseline is active: role bootstrap SQL automation is documented, and extract projection now resolves `source_trust_policy` to route publish outcomes (`published` vs `needs_review`) with integration coverage.
+Next: Open PR and verify real CI reports `api-fast` and `api-integration-db` as separate checks under branch protection.
+Open Questions: exact production Supabase URL/key provisioning is UNCONFIRMED.
 
 ## Done (recent)
+- 2026-02-09 `[CODE]` Enabled GitHub `main` branch protection required checks: `api-fast`, `api-integration-db`, `workers`, `web`, `validate-agent-contract`.
+- 2026-02-09 `[CODE]` Added `F2` trust-policy publish path in extract projection via `source_trust_policy` resolution with provenance events (`trust_policy_applied`).
+- 2026-02-09 `[CODE]` Added DB-backed integration tests for trust-policy behavior (trusted confidence gate, semi-trusted auto-publish, untrusted moderation, source-key override).
+- 2026-02-09 `[CODE]` Replaced placeholder bootstrap script with deterministic Supabase role/provenance SQL generation (`scripts/bootstrap_admin.py --user-id|--email --role`).
 - 2026-02-09 `[CODE]` Split CI API checks into `api-fast` and `api-integration-db`, and documented required branch checks in `README.md`.
-- 2026-02-09 `[CODE]` Captured Supabase human role provisioning conventions in runbook (`app_metadata.role|sj_role|roles[]`) for deterministic moderator/admin assignment.
-- 2026-02-09 `[CODE]` Added D2 reliability transitions (lease reaper endpoint + bounded retry/dead-letter) and worker-triggered lease reaping on polling loop.
-- 2026-02-09 `[CODE]` Added moderation APIs (`GET/PATCH /candidates`) with trusted Supabase `app_metadata` role enforcement, transition validation, and posting lifecycle coupling.
-- 2026-02-09 `[CODE]` Expanded public postings contract with detail endpoint and list search/filter/sort/pagination behavior.
 - 2026-02-09 `[CODE]` Added moderation merge + override workflows (`POST /candidates/{id}/merge|override`) with candidate/posting audit event retrieval.
 - 2026-02-09 `[CODE]` Hardened postings list semantics for whitespace-only filters, case-insensitive tag filtering, deterministic sort tie-breaks, and null-last `deadline/published_at` ordering with DB-backed integration tests.
 
@@ -49,3 +49,5 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-09 `[TOOL]` `SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "postings_list_reads_from_database or postings_filters_sort_pagination_and_detail or postings_edge_query_semantics_and_deterministic_tie_breaks"` passed (`3/3`).
 - 2026-02-09 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -> make db-down` passed (`13/13`).
 - 2026-02-09 `[TOOL]` `uv run --project api --extra dev pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py` passed (`11/11`).
+- 2026-02-09 `[TOOL]` `uv run --project api --extra dev pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py` passed (`13/13`, includes bootstrap-script tests).
+- 2026-02-09 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -> make db-down` passed (`17/17`, includes trust-policy routing coverage).

@@ -38,6 +38,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Add local Postgres compose/make workflow and extend integration coverage to postings list path.
 - [x] Harden postings list edge semantics (trimmed filters, case-insensitive tag match, deterministic tie-breaks, null-last deadline/published sorts) with integration coverage.
 - [x] Split CI into fast checks vs DB-backed integration required checks (`M1 + L1`).
+- [x] Start `A3/F2` baseline: role bootstrap SQL automation + trust-policy-based publish routing with integration coverage.
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
@@ -55,6 +56,8 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-09: Documented Supabase role-provisioning conventions in runbook so elevated role assignment is deterministic and aligned with API claim resolution.
 - 2026-02-09: Hardened `G1` query semantics for whitespace-only filters, case-insensitive tag filtering, deterministic sort tie-break behavior, and null-last handling for `deadline/published_at` with DB-backed test assertions.
 - 2026-02-09: Split CI API checks into `api-fast` and `api-integration-db`; documented required branch checks in README.
+- 2026-02-09: Added `source_trust_policy` resolution in extract projection so publish decisions route to `published` vs `needs_review`, and added integration coverage for trusted/semi-trusted/untrusted plus source-key override paths.
+- 2026-02-09: Replaced placeholder admin bootstrap script with deterministic role/provenance SQL generation (`--user-id|--email`, `--role`) and documented invocation in README/runbook.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -86,4 +89,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Start role/bootstrap automation (`A3`) and trust-policy publication logic (`F2`).
+1. Expand `F2` rule evaluation surface (beyond confidence/conflict baseline) and finish `F3` lifecycle transitions.
