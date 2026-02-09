@@ -18,7 +18,7 @@
 |---|---|---|
 | A1 | done | Monorepo scaffold and service layout are in place. |
 | A2 | done | Baseline schema + migration scripts are present and applied in CI/local flows. |
-| A3 | done | Role bootstrap script now emits deterministic Supabase role/provenance SQL and is documented in README/runbook. |
+| A3 | in_progress | Bootstrap script now emits deterministic Supabase SQL by user id/email; full environment provisioning automation remains pending. |
 | B1 | done | FastAPI skeleton and route wiring are in place. |
 | B2 | done | Machine auth validates against `modules` + `module_credentials` with scope checks. |
 | B3 | done | Human role claims resolve only from trusted Supabase `app_metadata` fields, with provisioning conventions captured in runbook. |
@@ -33,7 +33,7 @@
 | E3 | not_started | Dedupe scorer is not implemented. |
 | E4 | in_progress | Manual moderator merge path now records `candidate_merge_decisions` + provenance; auto-merge/review-queue policy engine remains pending. |
 | F1 | done | Moderation APIs now cover approve/reject (state patch), merge, and override flows with role checks + audit events. |
-| F2 | in_progress | Extract projection now resolves `source_trust_policy` and routes candidates to `published` vs `needs_review` with DB-backed integration coverage. |
+| F2 | in_progress | `source_trust_policy` routing now drives trusted/semi/untrusted publication paths with DB-backed integration coverage; broader policy automation remains pending. |
 | F3 | in_progress | `extract` job completion now projects baseline postings; lifecycle transitions (`stale/archived/closed`) remain pending. |
 | G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
 | G2 | not_started | Freshness checker job flow not implemented. |
@@ -55,13 +55,13 @@
 
 ## Next Implementation Steps (Priority Order)
 
-1. Move `G1` from partial to production-ready.
-- Harden search/filter semantics (edge cases, tie-break ordering, null deadline behavior).
-- Expand API contract tests for stability and backward compatibility.
+1. Advance `F3` from partial to production-ready.
+- Implement posting lifecycle transitions (`active/stale/archived/closed`) beyond baseline projection.
+- Add contract/integration coverage for lifecycle transitions and downgrade semantics.
 
-2. Continue `F2 + F3` publishing hardening.
-- Expand trust-policy controls beyond confidence/conflict baseline (for richer per-source rule enforcement).
-- Complete posting lifecycle transitions (`stale/archived/closed`) after trust-policy routing.
+2. Implement `G2` freshness checks and archive transitions.
+- Add scheduled freshness checker jobs with bounded retries before downgrade/archive.
+- Ensure lifecycle updates are deterministic and auditable with provenance receipts.
 
 ## Workstreams and Task Graph
 

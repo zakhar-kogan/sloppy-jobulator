@@ -10,7 +10,7 @@ Public research opportunities aggregator. This repo contains a monorepo scaffold
 
 ## Current Phase
 
-Initial foundation implementation is in progress (Phase 1 from `docs/roadmap/IMPLEMENTATION_PLAN_v1.2.md`).
+Phase 3 baseline implementation is in progress (`A3/F2` policy/bootstrap groundwork landed; `F3/G2` lifecycle/freshness work remains).
 
 ## Quick Start
 
