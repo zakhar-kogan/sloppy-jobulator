@@ -897,6 +897,10 @@ class PostgresRepository:
                     if not existing:
                         raise RepositoryNotFoundError("candidate not found")
 
+                    from_state = str(existing["state"])
+                    if state != from_state:
+                        self._validate_candidate_transition(from_state=from_state, to_state=state)
+
                     if state == "published":
                         has_posting = await conn.fetchval(
                             """
@@ -920,16 +924,23 @@ class PostgresRepository:
                         state,
                     )
 
-                    if state in {"published", "archived", "closed"}:
+                    posting_status: str | None = None
+                    if state in {"published", "archived", "closed", "rejected"}:
                         posting_status = {
                             "published": "active",
                             "archived": "archived",
                             "closed": "closed",
+                            "rejected": "archived",
                         }[state]
                         await conn.execute(
                             """
                             update postings
-                            set status = $2::posting_status
+                            set
+                              status = $2::posting_status,
+                              published_at = case
+                                when $2::posting_status = 'active' then coalesce(published_at, now())
+                                else published_at
+                              end
                             where candidate_id = $1::uuid
                             """,
                             candidate_id,
@@ -975,13 +986,13 @@ class PostgresRepository:
                         actor_user_id,
                         json.dumps(
                             {
-                                "from_state": existing["state"],
+                                "from_state": from_state,
                                 "to_state": state,
                                 "reason": reason,
                             }
                         ),
                     )
-                    if state in {"published", "archived", "closed"}:
+                    if posting_status:
                         posting_id = row["posting_id"] if row else None
                         if posting_id:
                             await conn.execute(
@@ -998,7 +1009,7 @@ class PostgresRepository:
                                 """,
                                 posting_id,
                                 actor_user_id,
-                                json.dumps({"candidate_state": state}),
+                                json.dumps({"candidate_state": state, "posting_status": posting_status}),
                             )
 
                     if not row:
@@ -1007,38 +1018,118 @@ class PostgresRepository:
         except (pg_exc.InvalidTextRepresentationError, asyncpg.DataError) as exc:
             raise RepositoryConflictError("invalid candidate state or id") from exc
 
-    async def list_postings(self, limit: int, offset: int) -> list[dict[str, Any]]:
+    async def list_postings(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        q: str | None,
+        organization_name: str | None,
+        country: str | None,
+        remote: bool | None,
+        status: str | None,
+        tag: str | None,
+        sort_by: str,
+        sort_dir: str,
+    ) -> list[dict[str, Any]]:
         pool = await self._get_pool()
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        def bind(value: Any) -> str:
+            params.append(value)
+            return f"${len(params)}"
+
+        if q:
+            q_pattern = f"%{q.strip()}%"
+            if q_pattern != "%%":
+                token = bind(q_pattern)
+                conditions.append(
+                    f"(p.title ilike {token} or p.organization_name ilike {token} or coalesce(p.description_text, '') ilike {token})"
+                )
+        if organization_name:
+            org_pattern = f"%{organization_name.strip()}%"
+            if org_pattern != "%%":
+                conditions.append(f"p.organization_name ilike {bind(org_pattern)}")
+        if country:
+            conditions.append(f"p.country ilike {bind(country.strip())}")
+        if remote is not None:
+            conditions.append(f"p.remote = {bind(remote)}")
+        if status:
+            conditions.append(f"p.status = {bind(status)}::posting_status")
+        if tag:
+            conditions.append(f"{bind(tag.strip())} = any(p.tags)")
+
+        where_sql = " and ".join(conditions) if conditions else "true"
+        sort_expr = self._resolve_postings_sort_expr(sort_by)
+        direction = "asc" if sort_dir == "asc" else "desc"
+
+        limit_token = bind(limit)
+        offset_token = bind(offset)
+
         rows = await pool.fetch(
-            """
+            f"""
             select
               id::text as id,
               title,
               organization_name,
               canonical_url,
               status::text as status,
+              country,
+              remote,
               tags,
+              updated_at,
               created_at
-            from postings
-            order by created_at desc
-            limit $1
-            offset $2
+            from postings p
+            where {where_sql}
+            order by {sort_expr} {direction}, p.id asc
+            limit {limit_token}
+            offset {offset_token}
             """,
-            limit,
-            offset,
+            *params,
         )
-        return [
-            {
-                "id": row["id"],
-                "title": row["title"],
-                "organization_name": row["organization_name"],
-                "canonical_url": row["canonical_url"],
-                "status": row["status"],
-                "tags": list(row["tags"] or []),
-                "created_at": row["created_at"],
-            }
-            for row in rows
-        ]
+        return [self._posting_list_row_to_dict(row) for row in rows]
+
+    async def get_posting(self, posting_id: str) -> dict[str, Any]:
+        pool = await self._get_pool()
+        try:
+            row = await pool.fetchrow(
+                """
+                select
+                  id::text as id,
+                  candidate_id::text as candidate_id,
+                  title,
+                  canonical_url,
+                  normalized_url,
+                  canonical_hash,
+                  organization_name,
+                  sector,
+                  degree_level,
+                  opportunity_kind,
+                  country,
+                  region,
+                  city,
+                  remote,
+                  tags,
+                  areas,
+                  description_text,
+                  application_url,
+                  deadline,
+                  source_refs,
+                  status::text as status,
+                  published_at,
+                  updated_at,
+                  created_at
+                from postings
+                where id = $1::uuid
+                """,
+                posting_id,
+            )
+        except (pg_exc.InvalidTextRepresentationError, asyncpg.DataError) as exc:
+            raise RepositoryNotFoundError("posting not found") from exc
+        if not row:
+            raise RepositoryNotFoundError("posting not found")
+        return self._posting_detail_row_to_dict(row)
 
     async def _get_pool(self) -> asyncpg.Pool:
         if not self.database_url:
@@ -1099,6 +1190,88 @@ class PostgresRepository:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
+
+    @staticmethod
+    def _posting_list_row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "title": row["title"],
+            "organization_name": row["organization_name"],
+            "canonical_url": row["canonical_url"],
+            "status": row["status"],
+            "country": row["country"],
+            "remote": bool(row["remote"]),
+            "tags": list(row["tags"] or []),
+            "updated_at": row["updated_at"],
+            "created_at": row["created_at"],
+        }
+
+    @staticmethod
+    def _posting_detail_row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
+        source_refs = row["source_refs"]
+        if isinstance(source_refs, str):
+            try:
+                source_refs = json.loads(source_refs)
+            except json.JSONDecodeError:
+                source_refs = []
+        if not isinstance(source_refs, list):
+            source_refs = []
+        source_refs = [item for item in source_refs if isinstance(item, dict)]
+
+        return {
+            "id": row["id"],
+            "candidate_id": row["candidate_id"],
+            "title": row["title"],
+            "canonical_url": row["canonical_url"],
+            "normalized_url": row["normalized_url"],
+            "canonical_hash": row["canonical_hash"],
+            "organization_name": row["organization_name"],
+            "sector": row["sector"],
+            "degree_level": row["degree_level"],
+            "opportunity_kind": row["opportunity_kind"],
+            "country": row["country"],
+            "region": row["region"],
+            "city": row["city"],
+            "remote": bool(row["remote"]),
+            "tags": list(row["tags"] or []),
+            "areas": list(row["areas"] or []),
+            "description_text": row["description_text"],
+            "application_url": row["application_url"],
+            "deadline": row["deadline"],
+            "source_refs": source_refs,
+            "status": row["status"],
+            "published_at": row["published_at"],
+            "updated_at": row["updated_at"],
+            "created_at": row["created_at"],
+        }
+
+    @staticmethod
+    def _resolve_postings_sort_expr(sort_by: str) -> str:
+        sort_map = {
+            "created_at": "p.created_at",
+            "updated_at": "p.updated_at",
+            "deadline": "p.deadline",
+            "published_at": "p.published_at",
+        }
+        return sort_map.get(sort_by, "p.created_at")
+
+    @staticmethod
+    def _validate_candidate_transition(*, from_state: str, to_state: str) -> None:
+        allowed_transitions = {
+            "discovered": {"processed", "needs_review", "rejected", "archived"},
+            "processed": {"publishable", "needs_review", "rejected", "archived"},
+            "needs_review": {"publishable", "rejected", "archived", "processed"},
+            "publishable": {"published", "rejected", "needs_review", "archived"},
+            "published": {"archived", "closed"},
+            "archived": {"published", "closed"},
+            "closed": {"archived"},
+            "rejected": {"needs_review", "archived"},
+        }
+        if to_state == from_state:
+            return
+        allowed = allowed_transitions.get(from_state)
+        if not allowed or to_state not in allowed:
+            raise RepositoryConflictError(f"invalid state transition: {from_state} -> {to_state}")
 
     def _compute_retry_delay_seconds(self, *, attempt: int) -> int:
         if self.job_retry_base_seconds <= 0:

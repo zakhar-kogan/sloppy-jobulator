@@ -15,6 +15,7 @@
 12. Gate projection/publish-side writes on explicit payload signals plus required-field completeness to prevent accidental public entity creation from stub processor outputs.
 13. Keep retry/dead-letter resolution in one server-side transition path (using persisted attempt counts) so all workers share consistent failure semantics.
 14. For Supabase-backed human authz, trust elevated roles only from operator-controlled claim sources (e.g., `app_metadata`), not user-editable profile metadata.
+15. Keep moderation state-transition rules and posting lifecycle coupling in one transactional repository path to avoid route-level policy drift.
 
 ## Anti-patterns
 1. Hidden side effects without tests or receipts.

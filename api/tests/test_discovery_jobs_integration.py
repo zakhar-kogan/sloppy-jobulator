@@ -10,6 +10,7 @@ import asyncpg  # type: ignore[import-untyped]
 import pytest
 from fastapi.testclient import TestClient
 
+import app.core.security as security
 from app.core.config import get_settings
 from app.main import app
 from app.services.repository import get_repository
@@ -420,6 +421,289 @@ def test_postings_list_reads_from_database(api_client: TestClient, database_url:
     assert posting["organization_name"] == "Example Institute"
     assert posting["status"] == "active"
     assert posting["tags"] == ["ml", "biology"]
+
+
+def test_postings_filters_sort_pagination_and_detail(api_client: TestClient, database_url: str) -> None:
+    _run(
+        _execute(
+            database_url,
+            """
+            insert into postings (
+              title,
+              canonical_url,
+              normalized_url,
+              canonical_hash,
+              organization_name,
+              country,
+              remote,
+              status,
+              tags,
+              description_text,
+              created_at,
+              updated_at
+            )
+            values
+              ($1, $2, $2, $3, $4, 'US', true, 'active', $5::text[], 'biology platform role', now() - interval '3 days', now() - interval '3 days'),
+              ($6, $7, $7, $8, $9, 'US', false, 'archived', $10::text[], 'chemistry role', now() - interval '2 days', now() - interval '2 days'),
+              ($11, $12, $12, $13, $14, 'DE', true, 'active', $15::text[], 'ml engineer', now() - interval '1 day', now() - interval '1 day')
+            """,
+            "Research Engineer, Biology Platform",
+            "https://example.edu/jobs/research-engineer-biology-platform",
+            "g1-hash-1",
+            "Example Institute",
+            ["ml", "biology"],
+            "Postdoc in Chemistry",
+            "https://example.edu/jobs/postdoc-chemistry",
+            "g1-hash-2",
+            "Chem Lab",
+            ["chemistry"],
+            "Machine Learning Scientist",
+            "https://example.edu/jobs/ml-scientist",
+            "g1-hash-3",
+            "Berlin AI Center",
+            ["ml"],
+        )
+    )
+
+    filtered_response = api_client.get(
+        "/postings",
+        params={"q": "biology", "country": "US", "remote": "true", "status": "active", "tag": "ml"},
+    )
+    assert filtered_response.status_code == 200
+    filtered = filtered_response.json()
+    assert len(filtered) == 1
+    assert filtered[0]["title"] == "Research Engineer, Biology Platform"
+
+    sorted_response = api_client.get("/postings", params={"sort_by": "updated_at", "sort_dir": "asc"})
+    assert sorted_response.status_code == 200
+    sorted_rows = sorted_response.json()
+    assert len(sorted_rows) == 3
+    assert sorted_rows[0]["title"] == "Research Engineer, Biology Platform"
+    assert sorted_rows[2]["title"] == "Machine Learning Scientist"
+
+    paged_response = api_client.get("/postings", params={"sort_by": "created_at", "sort_dir": "asc", "limit": 1, "offset": 1})
+    assert paged_response.status_code == 200
+    paged = paged_response.json()
+    assert len(paged) == 1
+    assert paged[0]["title"] == "Postdoc in Chemistry"
+
+    detail_id = _run(
+        _fetchval(
+            database_url,
+            "select id::text from postings where canonical_hash = 'g1-hash-1'",
+        )
+    )
+    detail_response = api_client.get(f"/postings/{detail_id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["id"] == detail_id
+    assert detail["canonical_hash"] == "g1-hash-1"
+    assert detail["country"] == "US"
+    assert detail["remote"] is True
+    assert detail["description_text"] == "biology platform role"
+
+
+def test_moderation_candidate_state_transitions_update_posting_status(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="moderator", user_id="00000000-0000-0000-0000-000000000321")
+    candidate_id, posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-mod-transition-1",
+        canonical_hash="mod-transition-hash-1",
+    )
+
+    archive_response = api_client.patch(
+        f"/candidates/{candidate_id}",
+        json={"state": "archived", "reason": "position filled"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert archive_response.status_code == 200
+    assert archive_response.json()["state"] == "archived"
+
+    archived_status_count = _run(
+        _fetchval(
+            database_url,
+            "select count(*) from postings where id = $1::uuid and status = 'archived'",
+            posting_id,
+        )
+    )
+    assert archived_status_count == 1
+
+    reopen_response = api_client.patch(
+        f"/candidates/{candidate_id}",
+        json={"state": "published", "reason": "reopened"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert reopen_response.status_code == 200
+    assert reopen_response.json()["state"] == "published"
+
+    active_status_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from postings
+            where id = $1::uuid
+              and status = 'active'
+              and published_at is not null
+            """,
+            posting_id,
+        )
+    )
+    assert active_status_count == 1
+
+
+def test_moderation_invalid_transition_returns_conflict(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="moderator", user_id="00000000-0000-0000-0000-000000000654")
+    candidate_id, _ = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-mod-transition-2",
+        canonical_hash="mod-transition-hash-2",
+    )
+
+    response = api_client.patch(
+        f"/candidates/{candidate_id}",
+        json={"state": "publishable", "reason": "invalid regression"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert response.status_code == 409
+
+
+def test_candidates_list_state_filter_with_human_auth(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="moderator", user_id="00000000-0000-0000-0000-000000000777")
+    candidate_id, _ = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-mod-list-1",
+        canonical_hash="mod-list-hash-1",
+    )
+
+    _run(
+        _execute(
+            database_url,
+            """
+            insert into posting_candidates (state, extracted_fields)
+            values ('needs_review', '{"title":"Needs review candidate"}'::jsonb)
+            """,
+        )
+    )
+
+    response = api_client.get(
+        "/candidates",
+        params={"state": "published", "limit": 10},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 1
+    assert rows[0]["id"] == candidate_id
+
+
+def _configure_mock_human_auth(monkeypatch: pytest.MonkeyPatch, *, role: str, user_id: str) -> None:
+    monkeypatch.setenv("SJ_SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SJ_SUPABASE_ANON_KEY", "anon-key")
+    get_settings.cache_clear()
+
+    async def _fake_fetch(**_: Any) -> dict[str, Any]:
+        return {"id": user_id, "app_metadata": {"role": role}}
+
+    monkeypatch.setattr(security, "_fetch_supabase_user", _fake_fetch)
+
+
+def _create_projected_candidate_and_posting(
+    api_client: TestClient,
+    database_url: str,
+    *,
+    external_id: str,
+    canonical_hash: str,
+) -> tuple[str, str]:
+    discovery_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": external_id,
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": f"https://example.edu/jobs/{external_id}",
+            "title_hint": "Moderation Candidate",
+            "text_hint": "Moderation flow candidate",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert discovery_response.status_code == 202
+    discovery_id = discovery_response.json()["discovery_id"]
+
+    jobs_response = api_client.get("/jobs", headers=PROCESSOR_HEADERS)
+    assert jobs_response.status_code == 200
+    jobs = jobs_response.json()
+    assert len(jobs) == 1
+    job_id = jobs[0]["id"]
+
+    claim_response = api_client.post(
+        f"/jobs/{job_id}/claim",
+        json={"lease_seconds": 120},
+        headers=PROCESSOR_HEADERS,
+    )
+    assert claim_response.status_code == 200
+
+    result_response = api_client.post(
+        f"/jobs/{job_id}/result",
+        json={
+            "status": "done",
+            "result_json": {
+                "posting": {
+                    "title": "Moderation Candidate",
+                    "organization_name": "Example University",
+                    "canonical_url": f"https://example.edu/jobs/{external_id}",
+                    "normalized_url": f"https://example.edu/jobs/{external_id}",
+                    "canonical_hash": canonical_hash,
+                    "country": "US",
+                    "remote": True,
+                    "tags": ["ml"],
+                    "source_refs": [{"kind": "discovery", "id": discovery_id}],
+                }
+            },
+        },
+        headers=PROCESSOR_HEADERS,
+    )
+    assert result_response.status_code == 200
+    assert result_response.json()["status"] == "done"
+
+    candidate_id = _run(
+        _fetchval(
+            database_url,
+            """
+            select pc.id::text
+            from posting_candidates pc
+            join candidate_discoveries cd on cd.candidate_id = pc.id
+            where cd.discovery_id = $1::uuid
+            """,
+            discovery_id,
+        )
+    )
+    posting_id = _run(
+        _fetchval(
+            database_url,
+            "select id::text from postings where canonical_hash = $1",
+            canonical_hash,
+        )
+    )
+    assert candidate_id
+    assert posting_id
+    return candidate_id, posting_id
 
 
 def _run(coro: Coroutine[Any, Any, T]) -> T:

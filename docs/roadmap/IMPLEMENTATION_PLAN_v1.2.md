@@ -32,10 +32,10 @@
 | E2 | not_started | Redirect resolution async job path is not implemented. |
 | E3 | not_started | Dedupe scorer is not implemented. |
 | E4 | not_started | Merge decision flow is not implemented. |
-| F1 | in_progress | Baseline moderation APIs exist (`GET /candidates`, `PATCH /candidates/{id}`) with role/scope checks; full moderation actions remain pending. |
+| F1 | in_progress | Moderation candidate state transitions + posting lifecycle coupling are implemented with authz checks; merge/override workflows remain pending. |
 | F2 | not_started | Trust-policy publication logic not implemented. |
 | F3 | in_progress | `extract` job completion now projects baseline postings; lifecycle transitions (`stale/archived/closed`) remain pending. |
-| G1 | in_progress | `GET /postings` exists; detail/filter/sort contracts are incomplete. |
+| G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
 | G2 | not_started | Freshness checker job flow not implemented. |
 | H1 | in_progress | Minimal Next.js public shell exists; full catalogue UX pending. |
 | H2 | not_started | Admin/moderator UI not implemented. |
@@ -48,7 +48,7 @@
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Integration tests cover discovery/jobs/postings-list, projection path, lease requeue, retry/dead-letter, and moderation authz allow/deny paths; full moderation pipeline tests pending. |
+| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, and moderation authz/state-transition paths; full moderation pipeline tests pending. |
 | L2 | not_started | Load/perf testing not implemented. |
 | M1 | in_progress | Quality CI exists (lint/typecheck/tests); full deploy + migration gate pipeline pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
@@ -58,11 +58,11 @@
 1. Complete `B3 + F1` authorization and moderation baseline.
 - Finalize production Supabase role provisioning conventions (`app_metadata.role|sj_role|roles[]`) and operator runbook.
 - Extend moderation actions beyond state patching (approve/reject/merge/override semantics).
-- Add integration tests for moderation state transitions and posting lifecycle coupling.
+- Add integration coverage for merge/conflict paths and moderator audit scenarios.
 
 2. Move `G1` from partial to production-ready.
-- Add posting detail endpoint and filter/sort/search pagination behavior.
-- Add API contract tests for query correctness and response stability.
+- Harden search/filter semantics (edge cases, tie-break ordering, null deadline behavior).
+- Expand API contract tests for stability and backward compatibility.
 
 3. Strengthen `M1 + L1` delivery safety.
 - Keep DB-backed integration tests required in CI.

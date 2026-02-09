@@ -48,6 +48,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-09: Materialized `extract` job results into candidates/postings with provenance writes and DB-backed integration assertions.
 - 2026-02-09: Completed D2 reliability baseline with API lease reaper + retry/dead-letter transitions and worker-triggered reaper loop.
 - 2026-02-09: Started `B3 + F1` baseline with trusted Supabase app-metadata role contract and moderation candidate endpoints + authz tests.
+- 2026-02-09: Expanded `B3 + F1 + G1` with moderation transition semantics and postings detail/filter/sort/search/pagination contracts + integration tests.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -79,5 +80,5 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Finalize environment-specific Supabase auth role provisioning conventions and moderation transition semantics.
-2. Move public postings API from list-only to detail/filter/sort/search contract coverage.
+1. Finalize environment-specific Supabase auth role provisioning conventions and moderation merge/override semantics.
+2. Harden postings query semantics and CI gate split for fast vs DB-backed integration suites.
