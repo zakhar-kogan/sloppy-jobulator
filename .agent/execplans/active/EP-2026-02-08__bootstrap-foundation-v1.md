@@ -49,6 +49,8 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-09: Completed D2 reliability baseline with API lease reaper + retry/dead-letter transitions and worker-triggered reaper loop.
 - 2026-02-09: Started `B3 + F1` baseline with trusted Supabase app-metadata role contract and moderation candidate endpoints + authz tests.
 - 2026-02-09: Expanded `B3 + F1 + G1` with moderation transition semantics and postings detail/filter/sort/search/pagination contracts + integration tests.
+- 2026-02-09: Added moderation merge/override execution paths with provenance audit retrieval and DB-backed conflict/override integration coverage.
+- 2026-02-09: Documented Supabase role-provisioning conventions in runbook so elevated role assignment is deterministic and aligned with API claim resolution.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -80,5 +82,5 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Finalize environment-specific Supabase auth role provisioning conventions and moderation merge/override semantics.
-2. Harden postings query semantics and CI gate split for fast vs DB-backed integration suites.
+1. Harden postings query semantics and CI gate split for fast vs DB-backed integration suites.
+2. Start role/bootstrap automation (`A3`) and trust-policy publication logic (`F2`).

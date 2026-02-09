@@ -29,6 +29,34 @@
 - Stop DB: `make db-down`
 5. Before running compose targets, verify Docker daemon availability (`docker info` or equivalent) to avoid socket connection failures.
 
+## Supabase human role provisioning (B3)
+1. Source of truth for elevated roles is Supabase `app_metadata` only; `user_metadata` must not grant `moderator`/`admin`.
+2. API claim resolution order is:
+- `app_metadata.role`
+- `app_metadata.sj_role`
+- first recognized value in `app_metadata.roles[]`
+3. Allowed role values: `user`, `moderator`, `admin` (unknown values downgrade to `user`).
+4. Example SQL (run in Supabase SQL editor with admin privileges):
+- Set moderator role:
+```sql
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('role', 'moderator')
+where id = '00000000-0000-0000-0000-000000000000'::uuid;
+```
+- Set admin role:
+```sql
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('role', 'admin')
+where id = '00000000-0000-0000-0000-000000000000'::uuid;
+```
+5. Verification query:
+```sql
+select id, raw_app_meta_data
+from auth.users
+where id = '00000000-0000-0000-0000-000000000000'::uuid;
+```
+6. After claim updates, refresh/re-authenticate the session so new JWT claims propagate to API calls.
+
 ## Incident basics
 1. Health check endpoint/command: `GET /healthz` on API.
 2. Log query path: `UNCONFIRMED` (Cloud Logging filters pending infra setup).

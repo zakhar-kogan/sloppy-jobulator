@@ -578,6 +578,58 @@ def test_moderation_invalid_transition_returns_conflict(
     assert response.status_code == 409
 
 
+def test_moderation_override_bypasses_transition_and_records_audit(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="moderator", user_id="00000000-0000-0000-0000-000000000655")
+    candidate_id, posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-mod-override-1",
+        canonical_hash="mod-override-hash-1",
+    )
+
+    invalid_patch_response = api_client.patch(
+        f"/candidates/{candidate_id}",
+        json={"state": "publishable", "reason": "would be invalid without override"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert invalid_patch_response.status_code == 409
+
+    override_response = api_client.post(
+        f"/candidates/{candidate_id}/override",
+        json={"state": "publishable", "reason": "manual rollback", "posting_status": "archived"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert override_response.status_code == 200
+    assert override_response.json()["state"] == "publishable"
+
+    posting_status_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from postings
+            where id = $1::uuid
+              and status = 'archived'
+            """,
+            posting_id,
+        )
+    )
+    assert posting_status_count == 1
+
+    events_response = api_client.get(
+        f"/candidates/{candidate_id}/events",
+        params={"limit": 20},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert events_response.status_code == 200
+    event_types = [event["event_type"] for event in events_response.json()]
+    assert "state_overridden" in event_types
+
+
 def test_candidates_list_state_filter_with_human_auth(
     api_client: TestClient,
     database_url: str,
@@ -610,6 +662,121 @@ def test_candidates_list_state_filter_with_human_auth(
     rows = response.json()
     assert len(rows) == 1
     assert rows[0]["id"] == candidate_id
+
+
+def test_moderation_merge_candidates_reassigns_posting_and_records_audit(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="moderator", user_id="00000000-0000-0000-0000-000000000888")
+    primary_candidate_id = _run(
+        _fetchval(
+            database_url,
+            """
+            insert into posting_candidates (state, extracted_fields)
+            values ('needs_review', '{"title":"Primary candidate"}'::jsonb)
+            returning id::text
+            """,
+        )
+    )
+    secondary_candidate_id, secondary_posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-merge-secondary",
+        canonical_hash="merge-secondary-hash",
+    )
+
+    merge_response = api_client.post(
+        f"/candidates/{primary_candidate_id}/merge",
+        json={"secondary_candidate_id": secondary_candidate_id, "reason": "same opportunity duplicate"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert merge_response.status_code == 200
+    merged = merge_response.json()
+    assert merged["id"] == primary_candidate_id
+
+    reassigned_posting_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from postings
+            where id = $1::uuid
+              and candidate_id = $2::uuid
+            """,
+            secondary_posting_id,
+            primary_candidate_id,
+        )
+    )
+    assert reassigned_posting_count == 1
+
+    secondary_archived_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from posting_candidates
+            where id = $1::uuid
+              and state = 'archived'
+            """,
+            secondary_candidate_id,
+        )
+    )
+    assert secondary_archived_count == 1
+
+    merge_decision_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from candidate_merge_decisions
+            where primary_candidate_id = $1::uuid
+              and secondary_candidate_id = $2::uuid
+              and decision = 'manual_merged'
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+        )
+    )
+    assert merge_decision_count == 1
+
+    events_response = api_client.get(
+        f"/candidates/{primary_candidate_id}/events",
+        params={"limit": 20},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert events_response.status_code == 200
+    event_types = [event["event_type"] for event in events_response.json()]
+    assert "merge_applied" in event_types
+    assert "candidate_reassigned" in event_types
+
+
+def test_moderation_merge_conflict_when_both_candidates_have_postings(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="moderator", user_id="00000000-0000-0000-0000-000000000999")
+    primary_candidate_id, _ = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-merge-primary-conflict",
+        canonical_hash="merge-primary-conflict-hash",
+    )
+    secondary_candidate_id, _ = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-merge-secondary-conflict",
+        canonical_hash="merge-secondary-conflict-hash",
+    )
+
+    merge_response = api_client.post(
+        f"/candidates/{primary_candidate_id}/merge",
+        json={"secondary_candidate_id": secondary_candidate_id, "reason": "duplicate conflict"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert merge_response.status_code == 409
 
 
 def _configure_mock_human_auth(monkeypatch: pytest.MonkeyPatch, *, role: str, user_id: str) -> None:

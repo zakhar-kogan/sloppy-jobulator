@@ -21,7 +21,7 @@
 | A3 | in_progress | Seed/bootstrap scripts exist; full role bootstrap flow remains incomplete. |
 | B1 | done | FastAPI skeleton and route wiring are in place. |
 | B2 | done | Machine auth validates against `modules` + `module_credentials` with scope checks. |
-| B3 | in_progress | Human role claims now resolve from trusted Supabase `app_metadata` fields only; production provisioning conventions still need finalization. |
+| B3 | done | Human role claims resolve only from trusted Supabase `app_metadata` fields, with provisioning conventions captured in runbook. |
 | C1 | done | Discovery ingest API is DB-backed with idempotency behavior. |
 | C2 | in_progress | Evidence metadata API is DB-backed; object store adapter is not implemented yet. |
 | C3 | done | `extract` job completion now materializes `posting_candidates` + discovery/evidence links with provenance writes. |
@@ -31,8 +31,8 @@
 | E1 | in_progress | Base URL normalization/hash logic exists; per-domain override support is pending. |
 | E2 | not_started | Redirect resolution async job path is not implemented. |
 | E3 | not_started | Dedupe scorer is not implemented. |
-| E4 | not_started | Merge decision flow is not implemented. |
-| F1 | in_progress | Moderation candidate state transitions + posting lifecycle coupling are implemented with authz checks; merge/override workflows remain pending. |
+| E4 | in_progress | Manual moderator merge path now records `candidate_merge_decisions` + provenance; auto-merge/review-queue policy engine remains pending. |
+| F1 | done | Moderation APIs now cover approve/reject (state patch), merge, and override flows with role checks + audit events. |
 | F2 | not_started | Trust-policy publication logic not implemented. |
 | F3 | in_progress | `extract` job completion now projects baseline postings; lifecycle transitions (`stale/archived/closed`) remain pending. |
 | G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
@@ -48,25 +48,24 @@
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, and moderation authz/state-transition paths; full moderation pipeline tests pending. |
+| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, and moderation authz/state/merge/override paths; end-to-end UI moderation tests remain pending. |
 | L2 | not_started | Load/perf testing not implemented. |
 | M1 | in_progress | Quality CI exists (lint/typecheck/tests); full deploy + migration gate pipeline pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
 
 ## Next Implementation Steps (Priority Order)
 
-1. Complete `B3 + F1` authorization and moderation baseline.
-- Finalize production Supabase role provisioning conventions (`app_metadata.role|sj_role|roles[]`) and operator runbook.
-- Extend moderation actions beyond state patching (approve/reject/merge/override semantics).
-- Add integration coverage for merge/conflict paths and moderator audit scenarios.
-
-2. Move `G1` from partial to production-ready.
+1. Move `G1` from partial to production-ready.
 - Harden search/filter semantics (edge cases, tie-break ordering, null deadline behavior).
 - Expand API contract tests for stability and backward compatibility.
 
-3. Strengthen `M1 + L1` delivery safety.
+2. Strengthen `M1 + L1` delivery safety.
 - Keep DB-backed integration tests required in CI.
 - Split fast vs integration test jobs and document required branch checks.
+
+3. Advance `A3 + F2` policy/bootstrap groundwork.
+- Add role/bootstrap automation hooks so environment provisioning is less manual.
+- Start trust-policy publishing logic (`source_trust_policy`) for moderation routing.
 
 ## Workstreams and Task Graph
 

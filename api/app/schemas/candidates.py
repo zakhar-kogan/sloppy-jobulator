@@ -14,6 +14,8 @@ CandidateState = Literal[
     "needs_review",
 ]
 
+PostingStatus = Literal["active", "stale", "archived", "closed"]
+
 
 class CandidateOut(BaseModel):
     id: str
@@ -30,3 +32,25 @@ class CandidateOut(BaseModel):
 class CandidatePatchRequest(BaseModel):
     state: CandidateState
     reason: str | None = None
+
+
+class CandidateMergeRequest(BaseModel):
+    secondary_candidate_id: str
+    reason: str | None = None
+
+
+class CandidateOverrideRequest(BaseModel):
+    state: CandidateState
+    reason: str | None = None
+    posting_status: PostingStatus | None = None
+
+
+class CandidateEventOut(BaseModel):
+    id: int
+    entity_type: str
+    entity_id: str | None = None
+    event_type: str
+    actor_type: str
+    actor_id: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
