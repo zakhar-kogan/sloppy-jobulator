@@ -503,6 +503,140 @@ def test_postings_filters_sort_pagination_and_detail(api_client: TestClient, dat
     assert detail["description_text"] == "biology platform role"
 
 
+def test_postings_edge_query_semantics_and_deterministic_tie_breaks(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    _run(
+        _execute(
+            database_url,
+            """
+            insert into postings (
+              title,
+              canonical_url,
+              normalized_url,
+              canonical_hash,
+              organization_name,
+              country,
+              remote,
+              status,
+              tags,
+              description_text,
+              deadline,
+              published_at,
+              created_at,
+              updated_at
+            )
+            values
+              ($1, $2, $2, $3, $4, 'US', true, 'active', $5::text[], 'alpha role', now() + interval '2 days', now() - interval '5 days', now() - interval '10 days', now() - interval '1 day'),
+              ($6, $7, $7, $8, $9, 'US', false, 'active', $10::text[], 'beta role', null, null, now() - interval '9 days', now() - interval '1 day'),
+              ($11, $12, $12, $13, $14, 'CA', false, 'active', $15::text[], 'gamma role', now() + interval '1 day', now() - interval '6 days', now() - interval '8 days', now() - interval '3 days'),
+              ($16, $17, $17, $18, $19, 'CA', false, 'active', $20::text[], 'delta role', null, null, now() - interval '7 days', now() - interval '3 days')
+            """,
+            "Alpha Position",
+            "https://example.edu/jobs/alpha-position",
+            "g1-edge-hash-1",
+            "Alpha Org",
+            ["Biology"],
+            "Beta Position",
+            "https://example.edu/jobs/beta-position",
+            "g1-edge-hash-2",
+            "Beta Org",
+            ["chemistry"],
+            "Gamma Position",
+            "https://example.edu/jobs/gamma-position",
+            "g1-edge-hash-3",
+            "Gamma Org",
+            ["ml"],
+            "Delta Position",
+            "https://example.edu/jobs/delta-position",
+            "g1-edge-hash-4",
+            "Delta Org",
+            ["history"],
+        )
+    )
+
+    whitespace_response = api_client.get(
+        "/postings",
+        params={
+            "q": "   ",
+            "organization_name": "   ",
+            "country": "   ",
+            "tag": "   ",
+            "sort_by": "created_at",
+            "sort_dir": "asc",
+        },
+    )
+    assert whitespace_response.status_code == 200
+    assert [row["title"] for row in whitespace_response.json()] == [
+        "Alpha Position",
+        "Beta Position",
+        "Gamma Position",
+        "Delta Position",
+    ]
+
+    trimmed_query_response = api_client.get("/postings", params={"q": "  alpha  "})
+    assert trimmed_query_response.status_code == 200
+    trimmed_rows = trimmed_query_response.json()
+    assert len(trimmed_rows) == 1
+    assert trimmed_rows[0]["title"] == "Alpha Position"
+
+    tag_response = api_client.get("/postings", params={"tag": "biology"})
+    assert tag_response.status_code == 200
+    tag_rows = tag_response.json()
+    assert len(tag_rows) == 1
+    assert tag_rows[0]["title"] == "Alpha Position"
+
+    country_response = api_client.get("/postings", params={"country": "us", "sort_by": "created_at", "sort_dir": "asc"})
+    assert country_response.status_code == 200
+    assert [row["title"] for row in country_response.json()] == ["Alpha Position", "Beta Position"]
+
+    updated_asc_response = api_client.get("/postings", params={"sort_by": "updated_at", "sort_dir": "asc"})
+    assert updated_asc_response.status_code == 200
+    assert [row["title"] for row in updated_asc_response.json()] == [
+        "Gamma Position",
+        "Delta Position",
+        "Alpha Position",
+        "Beta Position",
+    ]
+
+    updated_desc_response = api_client.get("/postings", params={"sort_by": "updated_at", "sort_dir": "desc"})
+    assert updated_desc_response.status_code == 200
+    assert [row["title"] for row in updated_desc_response.json()] == [
+        "Beta Position",
+        "Alpha Position",
+        "Delta Position",
+        "Gamma Position",
+    ]
+
+    deadline_asc_response = api_client.get("/postings", params={"sort_by": "deadline", "sort_dir": "asc"})
+    assert deadline_asc_response.status_code == 200
+    assert [row["title"] for row in deadline_asc_response.json()] == [
+        "Gamma Position",
+        "Alpha Position",
+        "Beta Position",
+        "Delta Position",
+    ]
+
+    deadline_desc_response = api_client.get("/postings", params={"sort_by": "deadline", "sort_dir": "desc"})
+    assert deadline_desc_response.status_code == 200
+    assert [row["title"] for row in deadline_desc_response.json()] == [
+        "Alpha Position",
+        "Gamma Position",
+        "Delta Position",
+        "Beta Position",
+    ]
+
+    published_desc_response = api_client.get("/postings", params={"sort_by": "published_at", "sort_dir": "desc"})
+    assert published_desc_response.status_code == 200
+    assert [row["title"] for row in published_desc_response.json()] == [
+        "Alpha Position",
+        "Gamma Position",
+        "Delta Position",
+        "Beta Position",
+    ]
+
+
 def test_moderation_candidate_state_transitions_update_posting_status(
     api_client: TestClient,
     database_url: str,

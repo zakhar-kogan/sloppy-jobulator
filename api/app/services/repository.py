@@ -1354,33 +1354,41 @@ class PostgresRepository:
             params.append(value)
             return f"${len(params)}"
 
-        if q:
-            q_pattern = f"%{q.strip()}%"
-            if q_pattern != "%%":
-                token = bind(q_pattern)
-                conditions.append(
-                    f"(p.title ilike {token} or p.organization_name ilike {token} or coalesce(p.description_text, '') ilike {token})"
-                )
-        if organization_name:
-            org_pattern = f"%{organization_name.strip()}%"
-            if org_pattern != "%%":
-                conditions.append(f"p.organization_name ilike {bind(org_pattern)}")
-        if country:
-            conditions.append(f"p.country ilike {bind(country.strip())}")
+        normalized_q = self._coerce_text(q)
+        if normalized_q:
+            token = bind(f"%{normalized_q}%")
+            conditions.append(
+                f"(p.title ilike {token} or p.organization_name ilike {token} or coalesce(p.description_text, '') ilike {token})"
+            )
+
+        normalized_org = self._coerce_text(organization_name)
+        if normalized_org:
+            conditions.append(f"p.organization_name ilike {bind(f'%{normalized_org}%')}")
+
+        normalized_country = self._coerce_text(country)
+        if normalized_country:
+            conditions.append(f"p.country ilike {bind(normalized_country)}")
+
         if remote is not None:
             conditions.append(f"p.remote = {bind(remote)}")
         if status:
             conditions.append(f"p.status = {bind(status)}::posting_status")
-        if tag:
-            conditions.append(f"{bind(tag.strip())} = any(p.tags)")
+
+        normalized_tag = self._coerce_text(tag)
+        if normalized_tag:
+            token = bind(normalized_tag)
+            conditions.append(
+                f"exists (select 1 from unnest(p.tags) as posting_tag(tag) where lower(posting_tag.tag) = lower({token}))"
+            )
 
         where_sql = " and ".join(conditions) if conditions else "true"
         sort_expr = self._resolve_postings_sort_expr(sort_by)
         direction = "asc" if sort_dir == "asc" else "desc"
+        tie_break_sql = "p.id asc" if sort_by == "created_at" else f"p.created_at {direction}, p.id asc"
         if sort_by in {"deadline", "published_at"}:
-            order_by_sql = f"({sort_expr} is null) asc, {sort_expr} {direction}, p.id asc"
+            order_by_sql = f"({sort_expr} is null) asc, {sort_expr} {direction}, {tie_break_sql}"
         else:
-            order_by_sql = f"{sort_expr} {direction}, p.id asc"
+            order_by_sql = f"{sort_expr} {direction}, {tie_break_sql}"
 
         limit_token = bind(limit)
         offset_token = bind(offset)
