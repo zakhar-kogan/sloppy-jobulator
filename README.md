@@ -65,9 +65,23 @@ pnpm --dir web dev
 ```bash
 make build
 make test
+make test-integration
 make lint
 make typecheck
 ```
+
+## Local Postgres for Integration Tests
+
+```bash
+make db-up
+make db-reset
+make test-integration
+make db-down
+```
+
+By default these targets use `postgresql://postgres:postgres@localhost:5432/sloppy_jobulator`.
+Override with `DB_URL=...` when needed.
+`make db-reset` drops/recreates `public` schema, then reapplies migration + seed.
 
 ## Notes
 

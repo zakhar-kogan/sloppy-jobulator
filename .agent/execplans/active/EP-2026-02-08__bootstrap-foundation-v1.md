@@ -3,7 +3,7 @@
 ## Metadata
 - Status: `ACTIVE`
 - Created: `2026-02-08`
-- Updated: `2026-02-08`
+- Updated: `2026-02-09`
 - Owner: `Codex`
 
 ## Purpose / Big Picture
@@ -35,6 +35,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Implement discovery/evidence persistence with provenance writes.
 - [x] Add CI workflow for api/workers/web lint/typecheck/tests gates.
 - [x] Add API integration tests for discovery->job claim/result flow and CI Postgres provisioning.
+- [x] Add local Postgres compose/make workflow and extend integration coverage to postings list path.
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
@@ -42,6 +43,9 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-08: Moved handoff docs into permanent `docs/spec` and `docs/roadmap` locations to remove `handoff/`.
 - 2026-02-08: Standardized Node workflows on `fnm` + `pnpm` and committed lockfile-backed web installs.
 - 2026-02-08: Added integration coverage for discovery->job flow with CI-managed Postgres service.
+- 2026-02-08: Added local compose + make commands for integration DB lifecycle and expanded integration tests to `/postings`.
+- 2026-02-08: Hardened local DB scripts for environments without host `psql` and stabilized API test lifecycle with lifespan-managed repository cleanup.
+- 2026-02-09: Materialized `extract` job results into candidates/postings with provenance writes and DB-backed integration assertions.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -73,6 +77,5 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Replace in-memory stores with Postgres repositories and transaction-safe provenance writes.
-2. Implement machine credential verification against `module_credentials`.
-3. Extend integration coverage from discovery->job flow into posting projection/moderation paths.
+1. Implement durable lease reaper/retry/dead-letter behavior for claimed jobs (`D2`) and add integration coverage.
+2. Finalize environment-specific Supabase auth role mapping conventions for production and wire first moderation APIs.

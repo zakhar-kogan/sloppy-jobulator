@@ -435,6 +435,20 @@ class PostgresRepository:
                             raise RepositoryForbiddenError("job claimed by another module")
                         raise RepositoryConflictError("job is not in claimed state")
 
+                    if (
+                        row["status"] == "done"
+                        and row["kind"] == "extract"
+                        and row["target_type"] == "discovery"
+                        and row["target_id"]
+                    ):
+                        await self._materialize_extract_projection(
+                            conn=conn,
+                            job_id=row["id"],
+                            discovery_id=row["target_id"],
+                            actor_module_db_id=module_db_id,
+                            result_json=result_json,
+                        )
+
                     await conn.execute(
                         """
                         insert into provenance_events (
@@ -454,6 +468,239 @@ class PostgresRepository:
                     return self._job_row_to_dict(row)
         except (pg_exc.InvalidTextRepresentationError, asyncpg.DataError) as exc:
             raise RepositoryNotFoundError("job not found") from exc
+
+    async def _materialize_extract_projection(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        job_id: str,
+        discovery_id: str,
+        actor_module_db_id: str,
+        result_json: dict[str, Any] | None,
+    ) -> None:
+        discovery = await conn.fetchrow(
+            """
+            select
+              id::text as id,
+              url,
+              normalized_url,
+              canonical_hash,
+              title_hint,
+              metadata
+            from discoveries
+            where id = $1::uuid
+            """,
+            discovery_id,
+        )
+        if not discovery:
+            return
+
+        extraction = result_json if isinstance(result_json, dict) else {}
+        posting_payload = extraction.get("posting")
+        projection_payload = posting_payload if isinstance(posting_payload, dict) else extraction
+
+        has_projection_signal = self._has_projection_signal(extraction=extraction, projection_payload=projection_payload)
+
+        discovery_metadata = discovery["metadata"] if isinstance(discovery["metadata"], dict) else {}
+        title = self._coerce_text(projection_payload.get("title")) or self._coerce_text(discovery["title_hint"])
+        organization_name = self._coerce_text(projection_payload.get("organization_name")) or self._coerce_text(
+            discovery_metadata.get("organization_name")
+        )
+        canonical_url = (
+            self._coerce_text(projection_payload.get("canonical_url"))
+            or self._coerce_text(projection_payload.get("url"))
+            or self._coerce_text(discovery["url"])
+            or self._coerce_text(discovery["normalized_url"])
+        )
+        normalized_url = (
+            self._coerce_text(projection_payload.get("normalized_url"))
+            or self._coerce_text(discovery["normalized_url"])
+            or canonical_url
+        )
+        canonical_hash = self._coerce_text(projection_payload.get("canonical_hash")) or self._coerce_text(
+            discovery["canonical_hash"]
+        )
+        posting_status = self._coerce_posting_status(projection_payload.get("status"), default="active")
+
+        can_project_posting = bool(
+            has_projection_signal and title and organization_name and canonical_url and normalized_url and canonical_hash
+        )
+        default_state = "published" if can_project_posting else "processed"
+        candidate_state = self._coerce_candidate_state(extraction.get("candidate_state"), default=default_state)
+        if not can_project_posting and candidate_state == "published":
+            candidate_state = "processed"
+
+        candidate_id = await conn.fetchval(
+            """
+            insert into posting_candidates (
+              state,
+              dedupe_bucket_key,
+              dedupe_confidence,
+              extracted_fields,
+              risk_flags
+            )
+            values ($1::candidate_state, $2, $3, $4::jsonb, $5::text[])
+            returning id::text
+            """,
+            candidate_state,
+            canonical_hash,
+            self._coerce_float(extraction.get("dedupe_confidence")),
+            json.dumps(extraction),
+            self._coerce_text_list(extraction.get("risk_flags")),
+        )
+
+        await conn.execute(
+            """
+            insert into candidate_discoveries (candidate_id, discovery_id)
+            values ($1::uuid, $2::uuid)
+            on conflict do nothing
+            """,
+            candidate_id,
+            discovery_id,
+        )
+        await conn.execute(
+            """
+            insert into candidate_evidence (candidate_id, evidence_id)
+            select $1::uuid, e.id
+            from evidence e
+            where e.discovery_id = $2::uuid
+            on conflict do nothing
+            """,
+            candidate_id,
+            discovery_id,
+        )
+        await conn.execute(
+            """
+            insert into provenance_events (
+              entity_type,
+              entity_id,
+              event_type,
+              actor_type,
+              actor_id,
+              payload
+            )
+            values ('posting_candidate', $1::uuid, 'materialized', 'machine', $2::uuid, $3::jsonb)
+            """,
+            candidate_id,
+            actor_module_db_id,
+            json.dumps({"job_id": job_id, "discovery_id": discovery_id, "state": candidate_state}),
+        )
+
+        if not can_project_posting:
+            return
+
+        source_refs = self._coerce_json_list(projection_payload.get("source_refs")) or [{"discovery_id": discovery_id}]
+        deadline = self._coerce_datetime(projection_payload.get("deadline"))
+
+        posting_id = await conn.fetchval(
+            """
+            insert into postings (
+              candidate_id,
+              title,
+              canonical_url,
+              normalized_url,
+              canonical_hash,
+              sector,
+              degree_level,
+              opportunity_kind,
+              organization_name,
+              country,
+              region,
+              city,
+              remote,
+              tags,
+              areas,
+              description_text,
+              application_url,
+              deadline,
+              source_refs,
+              status,
+              published_at
+            )
+            values (
+              $1::uuid,
+              $2,
+              $3,
+              $4,
+              $5,
+              $6,
+              $7,
+              $8,
+              $9,
+              $10,
+              $11,
+              $12,
+              $13,
+              $14::text[],
+              $15::text[],
+              $16,
+              $17,
+              $18::timestamptz,
+              $19::jsonb,
+              $20::posting_status,
+              case when $20::posting_status = 'active' then now() else null end
+            )
+            on conflict (canonical_hash)
+            do update set
+              candidate_id = excluded.candidate_id,
+              title = excluded.title,
+              canonical_url = excluded.canonical_url,
+              normalized_url = excluded.normalized_url,
+              sector = excluded.sector,
+              degree_level = excluded.degree_level,
+              opportunity_kind = excluded.opportunity_kind,
+              organization_name = excluded.organization_name,
+              country = excluded.country,
+              region = excluded.region,
+              city = excluded.city,
+              remote = excluded.remote,
+              tags = excluded.tags,
+              areas = excluded.areas,
+              description_text = excluded.description_text,
+              application_url = excluded.application_url,
+              deadline = excluded.deadline,
+              source_refs = excluded.source_refs,
+              status = excluded.status
+            returning id::text
+            """,
+            candidate_id,
+            title,
+            canonical_url,
+            normalized_url,
+            canonical_hash,
+            self._coerce_text(projection_payload.get("sector")),
+            self._coerce_text(projection_payload.get("degree_level")),
+            self._coerce_text(projection_payload.get("opportunity_kind")),
+            organization_name,
+            self._coerce_text(projection_payload.get("country")),
+            self._coerce_text(projection_payload.get("region")),
+            self._coerce_text(projection_payload.get("city")),
+            self._coerce_bool(projection_payload.get("remote")),
+            self._coerce_text_list(projection_payload.get("tags")),
+            self._coerce_text_list(projection_payload.get("areas")),
+            self._coerce_text(projection_payload.get("description_text")),
+            self._coerce_text(projection_payload.get("application_url")),
+            deadline,
+            json.dumps(source_refs),
+            posting_status,
+        )
+
+        await conn.execute(
+            """
+            insert into provenance_events (
+              entity_type,
+              entity_id,
+              event_type,
+              actor_type,
+              actor_id,
+              payload
+            )
+            values ('posting', $1::uuid, 'projected', 'machine', $2::uuid, $3::jsonb)
+            """,
+            posting_id,
+            actor_module_db_id,
+            json.dumps({"job_id": job_id, "candidate_id": candidate_id, "discovery_id": discovery_id}),
+        )
 
     async def list_postings(self, limit: int, offset: int) -> list[dict[str, Any]]:
         pool = await self._get_pool()
@@ -525,6 +772,122 @@ class PostgresRepository:
             "inputs_json": inputs_json,
             "status": row["status"],
         }
+
+    @staticmethod
+    def _coerce_text(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return str(value)
+
+    @staticmethod
+    def _coerce_text_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        items: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            stripped = item.strip()
+            if stripped:
+                items.append(stripped)
+        return items
+
+    @staticmethod
+    def _coerce_float(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _coerce_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+        return False
+
+    @staticmethod
+    def _coerce_datetime(value: Any) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            candidate = value.strip()
+            if not candidate:
+                return None
+            try:
+                return datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _coerce_json_list(value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        items: list[dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, dict):
+                items.append(item)
+        return items
+
+    @staticmethod
+    def _has_projection_signal(*, extraction: dict[str, Any], projection_payload: dict[str, Any]) -> bool:
+        if "posting" in extraction and isinstance(extraction["posting"], dict):
+            return True
+        projection_keys = {
+            "title",
+            "organization_name",
+            "canonical_url",
+            "normalized_url",
+            "canonical_hash",
+            "tags",
+            "areas",
+            "country",
+            "region",
+            "city",
+            "description_text",
+            "application_url",
+            "deadline",
+            "source_refs",
+        }
+        return any(key in projection_payload for key in projection_keys)
+
+    @staticmethod
+    def _coerce_candidate_state(value: Any, *, default: str) -> str:
+        allowed = {
+            "discovered",
+            "processed",
+            "publishable",
+            "published",
+            "rejected",
+            "closed",
+            "archived",
+            "needs_review",
+        }
+        if isinstance(value, str) and value in allowed:
+            return value
+        return default
+
+    @staticmethod
+    def _coerce_posting_status(value: Any, *, default: str) -> str:
+        allowed = {"active", "stale", "archived", "closed"}
+        if isinstance(value, str) and value in allowed:
+            return value
+        return default
 
 
 @lru_cache

@@ -46,16 +46,14 @@ def api_client(database_url: str) -> TestClient:
     get_settings.cache_clear()
     get_repository.cache_clear()
 
-    client = TestClient(app)
-    try:
+    with TestClient(app) as client:
         yield client
-    finally:
-        _run(get_repository().close())
-        get_repository.cache_clear()
-        get_settings.cache_clear()
+
+    get_repository.cache_clear()
+    get_settings.cache_clear()
 
 
-def test_discovery_enqueue_claim_and_result_flow(api_client: TestClient, database_url: str) -> None:
+def test_discovery_enqueue_claim_result_and_projection_flow(api_client: TestClient, database_url: str) -> None:
     payload = {
         "origin_module_id": "local-connector",
         "external_id": "ext-123",
@@ -90,9 +88,29 @@ def test_discovery_enqueue_claim_and_result_flow(api_client: TestClient, databas
     assert claim_response.status_code == 200
     assert claim_response.json()["status"] == "claimed"
 
+    projected_hash = discovery_data["canonical_hash"]
     result_response = api_client.post(
         f"/jobs/{job_id}/result",
-        json={"status": "done", "result_json": {"parsed": True}},
+        json={
+            "status": "done",
+            "result_json": {
+                "dedupe_confidence": 0.992,
+                "risk_flags": ["manual_review_low_confidence"],
+                "posting": {
+                    "title": "Biostatistics PhD Opportunity",
+                    "organization_name": "Example University",
+                    "canonical_url": "https://example.edu/jobs/biostats-phd",
+                    "normalized_url": discovery_data["normalized_url"],
+                    "canonical_hash": projected_hash,
+                    "country": "US",
+                    "remote": True,
+                    "tags": ["biostatistics", "phd"],
+                    "areas": ["medicine"],
+                    "description_text": "Funded doctoral research program in translational medicine.",
+                    "source_refs": [{"kind": "discovery", "id": discovery_id}],
+                },
+            },
+        },
         headers=PROCESSOR_HEADERS,
     )
     assert result_response.status_code == 200
@@ -107,6 +125,30 @@ def test_discovery_enqueue_claim_and_result_flow(api_client: TestClient, databas
     )
     assert done_job_count == 1
 
+    candidate_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from posting_candidates pc
+            join candidate_discoveries cd on cd.candidate_id = pc.id
+            where cd.discovery_id = $1::uuid
+              and pc.state = 'published'
+            """,
+            discovery_id,
+        )
+    )
+    assert candidate_count == 1
+
+    posting_count = _run(
+        _fetchval(
+            database_url,
+            "select count(*) from postings where canonical_hash = $1",
+            projected_hash,
+        )
+    )
+    assert posting_count == 1
+
     job_event_count = _run(
         _fetchval(
             database_url,
@@ -115,6 +157,32 @@ def test_discovery_enqueue_claim_and_result_flow(api_client: TestClient, databas
         )
     )
     assert job_event_count >= 2
+
+    candidate_event_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and event_type = 'materialized'
+            """,
+        )
+    )
+    assert candidate_event_count == 1
+
+    posting_event_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from provenance_events
+            where entity_type = 'posting'
+              and event_type = 'projected'
+            """,
+        )
+    )
+    assert posting_event_count == 1
 
 
 def test_discovery_idempotency_does_not_duplicate_job(api_client: TestClient) -> None:
@@ -145,6 +213,44 @@ def test_discovery_idempotency_does_not_duplicate_job(api_client: TestClient) ->
     assert jobs[0]["target_id"] == first_discovery_id
 
 
+def test_postings_list_reads_from_database(api_client: TestClient, database_url: str) -> None:
+    posting_id = _run(
+        _fetchval(
+            database_url,
+            """
+            insert into postings (
+              title,
+              canonical_url,
+              normalized_url,
+              canonical_hash,
+              organization_name,
+              tags
+            )
+            values ($1, $2, $3, $4, $5, $6::text[])
+            returning id::text
+            """,
+            "Research Engineer, Platform Biology",
+            "https://example.edu/jobs/research-engineer-platform-biology",
+            "https://example.edu/jobs/research-engineer-platform-biology",
+            "postings-hash-1",
+            "Example Institute",
+            ["ml", "biology"],
+        )
+    )
+    assert posting_id
+
+    response = api_client.get("/postings")
+    assert response.status_code == 200
+    postings = response.json()
+    assert len(postings) == 1
+    posting = postings[0]
+    assert posting["id"] == posting_id
+    assert posting["title"] == "Research Engineer, Platform Biology"
+    assert posting["organization_name"] == "Example Institute"
+    assert posting["status"] == "active"
+    assert posting["tags"] == ["ml", "biology"]
+
+
 def _run(coro: Coroutine[Any, Any, T]) -> T:
     return asyncio.run(coro)
 
@@ -157,6 +263,8 @@ async def _truncate_integration_tables(database_url: str) -> None:
             truncate table
               candidate_evidence,
               candidate_discoveries,
+              postings,
+              posting_candidates,
               evidence,
               discoveries,
               jobs,

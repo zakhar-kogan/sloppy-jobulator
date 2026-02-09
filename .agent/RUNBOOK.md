@@ -22,6 +22,12 @@
 1. Migration command: `DATABASE_URL=... bash scripts/apply_db_schema.sh`
 2. Seed command: included in `scripts/apply_db_schema.sh` (`db/seeds/001_taxonomy.sql`)
 3. Rollback/recovery: `UNCONFIRMED` (down migrations not implemented yet)
+4. Local integration DB lifecycle:
+- Start DB: `make db-up`
+- Reset schema+seed: `make db-reset`
+- Run API integration tests: `make test-integration`
+- Stop DB: `make db-down`
+5. Before running compose targets, verify Docker daemon availability (`docker info` or equivalent) to avoid socket connection failures.
 
 ## Incident basics
 1. Health check endpoint/command: `GET /healthz` on API.

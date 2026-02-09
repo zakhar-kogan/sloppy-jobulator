@@ -5,6 +5,74 @@
 - Complexity: `S` (1-2 days), `M` (3-5 days), `L` (1-2 weeks), `XL` (2+ weeks).
 - Order: lower number means earlier on optimal critical path.
 
+## Status Snapshot (2026-02-09)
+
+### Status legend
+- `done`: implemented and validated in current repo/CI.
+- `in_progress`: partially implemented; contract exists but key behavior is still missing.
+- `not_started`: no meaningful implementation yet.
+
+### Current task status
+
+| ID | Status | Notes |
+|---|---|---|
+| A1 | done | Monorepo scaffold and service layout are in place. |
+| A2 | done | Baseline schema + migration scripts are present and applied in CI/local flows. |
+| A3 | in_progress | Seed/bootstrap scripts exist; full role bootstrap flow remains incomplete. |
+| B1 | done | FastAPI skeleton and route wiring are in place. |
+| B2 | done | Machine auth validates against `modules` + `module_credentials` with scope checks. |
+| B3 | in_progress | Supabase token verification exists; production role/claim conventions still need finalization. |
+| C1 | done | Discovery ingest API is DB-backed with idempotency behavior. |
+| C2 | in_progress | Evidence metadata API is DB-backed; object store adapter is not implemented yet. |
+| C3 | done | `extract` job completion now materializes `posting_candidates` + discovery/evidence links with provenance writes. |
+| D1 | done | Job ledger API (`GET/claim/result`) is DB-backed. |
+| D2 | in_progress | Worker backoff loop exists; durable lease reaper scheduler/requeue policy still incomplete. |
+| D3 | in_progress | Worker scaffold exists; structured logs/OTel and richer execution semantics are pending. |
+| E1 | in_progress | Base URL normalization/hash logic exists; per-domain override support is pending. |
+| E2 | not_started | Redirect resolution async job path is not implemented. |
+| E3 | not_started | Dedupe scorer is not implemented. |
+| E4 | not_started | Merge decision flow is not implemented. |
+| F1 | not_started | Moderation APIs not implemented. |
+| F2 | not_started | Trust-policy publication logic not implemented. |
+| F3 | in_progress | `extract` job completion now projects baseline postings; lifecycle transitions (`stale/archived/closed`) remain pending. |
+| G1 | in_progress | `GET /postings` exists; detail/filter/sort contracts are incomplete. |
+| G2 | not_started | Freshness checker job flow not implemented. |
+| H1 | in_progress | Minimal Next.js public shell exists; full catalogue UX pending. |
+| H2 | not_started | Admin/moderator UI not implemented. |
+| I1 | not_started | TaskRouter abstraction not implemented. |
+| I2 | not_started | LiteLLM adapter not implemented. |
+| J1 | not_started | OTel instrumentation not implemented. |
+| J2 | not_started | Dashboards/alerts not implemented. |
+| K1 | not_started | Connector SDK package not implemented. |
+| K2 | not_started | RSS connector not implemented. |
+| K3 | not_started | Telegram connector not implemented. |
+| K4 | not_started | Apify connector not implemented. |
+| K5 | not_started | Social connectors not implemented. |
+| L1 | in_progress | Integration tests cover discovery/jobs/postings-list and discovery->job-result->posting projection; moderation pipeline tests pending. |
+| L2 | not_started | Load/perf testing not implemented. |
+| M1 | in_progress | Quality CI exists (lint/typecheck/tests); full deploy + migration gate pipeline pending. |
+| M2 | not_started | Launch hardening checklist/runbook not complete. |
+
+## Next Implementation Steps (Priority Order)
+
+1. Complete `D2` durable execution reliability.
+- Implement lease reaper over DB jobs (requeue expired claimed jobs).
+- Add bounded retry / attempt / dead-letter policy with explicit transitions.
+- Add integration coverage for expired leases and terminal failure paths.
+
+2. Complete `B3 + F1` authorization and moderation baseline.
+- Finalize Supabase role claim contract and enforce role checks.
+- Implement first moderation endpoints (`GET /candidates`, `PATCH /candidates/{id}`).
+- Add authz tests for role and scope denial/allow paths.
+
+3. Move `G1` from partial to production-ready.
+- Add posting detail endpoint and filter/sort/search pagination behavior.
+- Add API contract tests for query correctness and response stability.
+
+4. Strengthen `M1 + L1` delivery safety.
+- Keep DB-backed integration tests required in CI.
+- Split fast vs integration test jobs and document required branch checks.
+
 ## Workstreams and Task Graph
 
 | Order | ID | Task | Priority | Complexity | Depends On | Notes |

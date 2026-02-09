@@ -6,12 +6,11 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   exit 1
 fi
 
-apply_with_host_psql() {
-  psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f db/migrations/0001_schema_v1.sql
-  psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f db/seeds/001_taxonomy.sql
+run_reset_host() {
+  psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "drop schema if exists public cascade; create schema public;"
 }
 
-apply_with_compose_psql() {
+run_reset_compose() {
   local db_user db_name
 
   if [[ "$DATABASE_URL" =~ postgresql://([^:/]+):[^@]+@[^/]+/([^?]+) ]]; then
@@ -22,18 +21,20 @@ apply_with_compose_psql() {
     exit 1
   fi
 
-  cat db/migrations/0001_schema_v1.sql | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$db_user" -d "$db_name"
-  cat db/seeds/001_taxonomy.sql | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$db_user" -d "$db_name"
+  echo "drop schema if exists public cascade; create schema public;" \
+    | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$db_user" -d "$db_name"
 }
 
 if command -v psql >/dev/null 2>&1; then
-  apply_with_host_psql
+  run_reset_host
 elif command -v docker >/dev/null 2>&1 && docker compose ps postgres >/dev/null 2>&1; then
-  echo "psql not found on host; using docker compose postgres service for schema apply."
-  apply_with_compose_psql
+  echo "psql not found on host; using docker compose postgres service for schema reset."
+  run_reset_compose
 else
   echo "Neither host psql nor a running docker compose postgres service is available."
   exit 1
 fi
 
-echo "Schema and seed applied"
+DATABASE_URL="$DATABASE_URL" bash scripts/apply_db_schema.sh
+
+echo "Database reset complete"
