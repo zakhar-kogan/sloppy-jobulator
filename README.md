@@ -81,6 +81,20 @@ Configure branch protection to require these CI jobs:
 
 This keeps fast checks and DB-backed integration checks as separate required gates.
 
+## Human Role Bootstrap (A3)
+
+Generate deterministic SQL for Supabase role assignment + provenance audit:
+
+```bash
+python scripts/bootstrap_admin.py --user-id 00000000-0000-0000-0000-000000000000 --role admin
+```
+
+Email-based targeting is also supported:
+
+```bash
+python scripts/bootstrap_admin.py --email admin@example.edu --role moderator
+```
+
 ## Local Postgres for Integration Tests
 
 ```bash

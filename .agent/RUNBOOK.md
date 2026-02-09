@@ -34,13 +34,17 @@
 5. Before running compose targets, verify Docker daemon availability (`docker info` or equivalent) to avoid socket connection failures.
 
 ## Supabase human role provisioning (B3)
-1. Source of truth for elevated roles is Supabase `app_metadata` only; `user_metadata` must not grant `moderator`/`admin`.
-2. API claim resolution order is:
+1. Bootstrap SQL command:
+- `python scripts/bootstrap_admin.py --user-id <supabase-user-uuid> --role admin`
+- Alternative target by email: `python scripts/bootstrap_admin.py --email <user@example.org> --role moderator`
+2. The script emits SQL for `auth.users.raw_app_meta_data.role` plus a provenance event insert.
+3. Source of truth for elevated roles is Supabase `app_metadata` only; `user_metadata` must not grant `moderator`/`admin`.
+4. API claim resolution order is:
 - `app_metadata.role`
 - `app_metadata.sj_role`
 - first recognized value in `app_metadata.roles[]`
-3. Allowed role values: `user`, `moderator`, `admin` (unknown values downgrade to `user`).
-4. Example SQL (run in Supabase SQL editor with admin privileges):
+5. Allowed role values: `user`, `moderator`, `admin` (unknown values downgrade to `user`).
+6. Example SQL (run in Supabase SQL editor with admin privileges):
 - Set moderator role:
 ```sql
 update auth.users
@@ -53,13 +57,23 @@ update auth.users
 set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('role', 'admin')
 where id = '00000000-0000-0000-0000-000000000000'::uuid;
 ```
-5. Verification query:
+7. Verification query:
 ```sql
 select id, raw_app_meta_data
 from auth.users
 where id = '00000000-0000-0000-0000-000000000000'::uuid;
 ```
-6. After claim updates, refresh/re-authenticate the session so new JWT claims propagate to API calls.
+8. After claim updates, refresh/re-authenticate the session so new JWT claims propagate to API calls.
+
+## Trust-policy publish routing (F2 baseline)
+1. Extract projection resolves policy from `source_trust_policy` in precedence order:
+- explicit `source_key`
+- `module:<module_id>`
+- `default:<module_trust_level>`
+2. Publish routing currently maps to:
+- auto-publish path: candidate `published`, posting `active`
+- moderation path: candidate `needs_review`, posting `archived`
+3. Every policy decision emits `provenance_events` with `event_type='trust_policy_applied'`; use this first when debugging unexpected publish/moderation outcomes.
 
 ## Incident basics
 1. Health check endpoint/command: `GET /healthz` on API.

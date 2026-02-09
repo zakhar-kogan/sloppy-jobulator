@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import Coroutine
 from datetime import datetime, timezone
@@ -24,6 +25,8 @@ PROCESSOR_HEADERS = {
     "X-Module-Id": "local-processor",
     "X-API-Key": "local-processor-key",
 }
+
+LOCAL_CONNECTOR_KEY_HASH = "a061dd1a62bc85bc23d5625af753a75aec0d8f9e8e0ab21d4161ce1c6bd6a6d0"
 
 T = TypeVar("T")
 
@@ -913,6 +916,204 @@ def test_moderation_merge_conflict_when_both_candidates_have_postings(
     assert merge_response.status_code == 409
 
 
+def test_trust_policy_blocks_publish_when_below_confidence_for_trusted_source(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    candidate_id, posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-trust-confidence-low",
+        canonical_hash="trust-confidence-low-hash",
+        dedupe_confidence=0.40,
+    )
+
+    candidate_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            candidate_id,
+        )
+    )
+    posting_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            posting_id,
+        )
+    )
+    trust_policy_reason = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'reason'
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'trust_policy_applied'
+            order by id desc
+            limit 1
+            """,
+            candidate_id,
+        )
+    )
+
+    assert candidate_state == "needs_review"
+    assert posting_status == "archived"
+    assert trust_policy_reason == "below_min_confidence"
+
+
+def test_trust_policy_allows_semi_trusted_without_conflict(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    _run(_ensure_connector_module(database_url, module_id="semi-trusted-connector", trust_level="semi_trusted"))
+    semi_trusted_headers = {
+        "X-Module-Id": "semi-trusted-connector",
+        "X-API-Key": "local-connector-key",
+    }
+
+    candidate_id, posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-semi-trusted-auto-publish",
+        canonical_hash="semi-trusted-auto-publish-hash",
+        connector_headers=semi_trusted_headers,
+        dedupe_confidence=0.99,
+    )
+
+    candidate_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            candidate_id,
+        )
+    )
+    posting_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            posting_id,
+        )
+    )
+
+    assert candidate_state == "published"
+    assert posting_status == "active"
+
+
+def test_trust_policy_requires_moderation_for_untrusted_source(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    _run(_ensure_connector_module(database_url, module_id="untrusted-connector", trust_level="untrusted"))
+    untrusted_headers = {
+        "X-Module-Id": "untrusted-connector",
+        "X-API-Key": "local-connector-key",
+    }
+
+    candidate_id, posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-untrusted-review",
+        canonical_hash="untrusted-review-hash",
+        connector_headers=untrusted_headers,
+        dedupe_confidence=1.0,
+    )
+
+    candidate_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            candidate_id,
+        )
+    )
+    posting_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            posting_id,
+        )
+    )
+    trust_policy_reason = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'reason'
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'trust_policy_applied'
+            order by id desc
+            limit 1
+            """,
+            candidate_id,
+        )
+    )
+
+    assert candidate_state == "needs_review"
+    assert posting_status == "archived"
+    assert trust_policy_reason == "untrusted_requires_moderation"
+
+
+def test_trust_policy_uses_source_key_override(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    _run(
+        _upsert_source_trust_policy(
+            database_url,
+            source_key="tests:force-review",
+            trust_level="trusted",
+            auto_publish=False,
+            requires_moderation=True,
+            rules_json={"min_confidence": 0.0},
+        )
+    )
+
+    candidate_id, posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-source-key-policy",
+        canonical_hash="source-key-policy-hash",
+        dedupe_confidence=0.99,
+        source_key="tests:force-review",
+    )
+
+    candidate_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            candidate_id,
+        )
+    )
+    posting_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            posting_id,
+        )
+    )
+    applied_source_key = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'source_key'
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'trust_policy_applied'
+            order by id desc
+            limit 1
+            """,
+            candidate_id,
+        )
+    )
+
+    assert candidate_state == "needs_review"
+    assert posting_status == "archived"
+    assert applied_source_key == "tests:force-review"
+
+
 def _configure_mock_human_auth(monkeypatch: pytest.MonkeyPatch, *, role: str, user_id: str) -> None:
     monkeypatch.setenv("SJ_SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SJ_SUPABASE_ANON_KEY", "anon-key")
@@ -930,19 +1131,28 @@ def _create_projected_candidate_and_posting(
     *,
     external_id: str,
     canonical_hash: str,
+    connector_headers: dict[str, str] = CONNECTOR_HEADERS,
+    dedupe_confidence: float = 0.99,
+    risk_flags: list[str] | None = None,
+    source_key: str | None = None,
 ) -> tuple[str, str]:
+    module_id = connector_headers["X-Module-Id"]
+    metadata: dict[str, Any] = {"source": "integration-test"}
+    if source_key:
+        metadata["source_key"] = source_key
+
     discovery_response = api_client.post(
         "/discoveries",
         json={
-            "origin_module_id": "local-connector",
+            "origin_module_id": module_id,
             "external_id": external_id,
             "discovered_at": datetime.now(timezone.utc).isoformat(),
             "url": f"https://example.edu/jobs/{external_id}",
             "title_hint": "Moderation Candidate",
             "text_hint": "Moderation flow candidate",
-            "metadata": {"source": "integration-test"},
+            "metadata": metadata,
         },
-        headers=CONNECTOR_HEADERS,
+        headers=connector_headers,
     )
     assert discovery_response.status_code == 202
     discovery_id = discovery_response.json()["discovery_id"]
@@ -965,6 +1175,9 @@ def _create_projected_candidate_and_posting(
         json={
             "status": "done",
             "result_json": {
+                "dedupe_confidence": dedupe_confidence,
+                "risk_flags": risk_flags or [],
+                "source_key": source_key,
                 "posting": {
                     "title": "Moderation Candidate",
                     "organization_name": "Example University",
@@ -1027,6 +1240,85 @@ async def _truncate_integration_tables(database_url: str) -> None:
               provenance_events
             restart identity cascade
             """
+        )
+    finally:
+        await conn.close()
+
+
+async def _ensure_connector_module(database_url: str, *, module_id: str, trust_level: str) -> None:
+    conn = await asyncpg.connect(database_url)
+    try:
+        await conn.execute(
+            """
+            insert into modules (module_id, name, kind, enabled, scopes, trust_level)
+            values ($1, $2, 'connector', true, array['discoveries:write', 'evidence:write'], $3::module_trust_level)
+            on conflict (module_id)
+            do update set
+              name = excluded.name,
+              kind = excluded.kind,
+              enabled = excluded.enabled,
+              scopes = excluded.scopes,
+              trust_level = excluded.trust_level
+            """,
+            module_id,
+            f"{module_id} test module",
+            trust_level,
+        )
+        await conn.execute(
+            """
+            insert into module_credentials (module_id, key_hint, key_hash, is_active)
+            select id, $2, $3, true
+            from modules
+            where module_id = $1
+            on conflict (module_id, key_hint)
+            do update set
+              key_hash = excluded.key_hash,
+              is_active = true,
+              revoked_at = null
+            """,
+            module_id,
+            module_id,
+            LOCAL_CONNECTOR_KEY_HASH,
+        )
+    finally:
+        await conn.close()
+
+
+async def _upsert_source_trust_policy(
+    database_url: str,
+    *,
+    source_key: str,
+    trust_level: str,
+    auto_publish: bool,
+    requires_moderation: bool,
+    rules_json: dict[str, Any],
+) -> None:
+    conn = await asyncpg.connect(database_url)
+    try:
+        await conn.execute(
+            """
+            insert into source_trust_policy (
+              source_key,
+              trust_level,
+              auto_publish,
+              requires_moderation,
+              rules_json,
+              enabled
+            )
+            values ($1, $2::module_trust_level, $3, $4, $5::jsonb, true)
+            on conflict (source_key)
+            do update set
+              trust_level = excluded.trust_level,
+              auto_publish = excluded.auto_publish,
+              requires_moderation = excluded.requires_moderation,
+              rules_json = excluded.rules_json,
+              enabled = true
+            """,
+            source_key,
+            trust_level,
+            auto_publish,
+            requires_moderation,
+            json.dumps(rules_json),
         )
     finally:
         await conn.close()
