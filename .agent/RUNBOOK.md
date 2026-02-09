@@ -17,6 +17,10 @@
 3. Lint: `cd api && ruff check app tests` and `cd workers && ruff check app tests` and `fnm exec --using 24.13.0 pnpm --dir web lint`
 4. Typecheck: `cd api && mypy app` and `cd workers && mypy app` and `fnm exec --using 24.13.0 pnpm --dir web typecheck`
 5. Required pre-finalization checks (fill with concrete commands): `bash scripts/agent-hygiene-check.sh --mode project`
+6. CI gate split (`M1 + L1`):
+- Fast lane: `api-fast`, `workers`, `web`.
+- DB-backed integration lane: `api-integration-db` (runs `api/tests/test_discovery_jobs_integration.py` with Postgres + schema apply).
+- Branch protection should require: `api-fast`, `api-integration-db`, `workers`, `web`, and `validate-agent-contract`.
 
 ## Database operations
 1. Migration command: `DATABASE_URL=... bash scripts/apply_db_schema.sh`

@@ -48,9 +48,9 @@
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, and moderation authz/state/merge/override paths; end-to-end UI moderation tests remain pending. |
+| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, and moderation authz/state/merge/override paths; CI now runs DB-backed integration as a separate required job, while end-to-end UI moderation tests remain pending. |
 | L2 | not_started | Load/perf testing not implemented. |
-| M1 | in_progress | Quality CI exists (lint/typecheck/tests); full deploy + migration gate pipeline pending. |
+| M1 | in_progress | Quality CI is split into fast and DB-backed integration required checks; full deploy + migration gate pipeline remains pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
 
 ## Next Implementation Steps (Priority Order)
@@ -59,11 +59,7 @@
 - Harden search/filter semantics (edge cases, tie-break ordering, null deadline behavior).
 - Expand API contract tests for stability and backward compatibility.
 
-2. Strengthen `M1 + L1` delivery safety.
-- Keep DB-backed integration tests required in CI.
-- Split fast vs integration test jobs and document required branch checks.
-
-3. Advance `A3 + F2` policy/bootstrap groundwork.
+2. Advance `A3 + F2` policy/bootstrap groundwork.
 - Add role/bootstrap automation hooks so environment provisioning is less manual.
 - Start trust-policy publishing logic (`source_trust_policy`) for moderation routing.
 

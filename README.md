@@ -70,6 +70,17 @@ make lint
 make typecheck
 ```
 
+## CI Required Checks (Branch Protection)
+
+Configure branch protection to require these CI jobs:
+- `api-fast`
+- `api-integration-db`
+- `workers`
+- `web`
+- `validate-agent-contract` (from `Agent Hygiene` workflow)
+
+This keeps fast checks and DB-backed integration checks as separate required gates.
+
 ## Local Postgres for Integration Tests
 
 ```bash

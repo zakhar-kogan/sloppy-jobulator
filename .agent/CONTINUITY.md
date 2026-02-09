@@ -14,18 +14,18 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `B3 + F1 + G1` hardened: trusted Supabase role claims are enforced; moderation supports state patch, merge, and explicit override flows with provenance audit events; postings search/filter/sort semantics now include whitespace-safe filters, case-insensitive tag matching, deterministic tie-break ordering, and null-last deadline/published sorting with integration coverage.
-Next: Implement `M1 + L1` CI safety gates for fast vs DB-backed integration checks, then start `A3/F2` policy/bootstrap automation.
+Now: `M1 + L1` CI safety gate split is live: API fast checks and DB-backed integration checks run as separate required CI jobs; branch-check names are documented alongside existing `B3 + F1 + G1` hardened contracts.
+Next: Start `A3/F2` policy/bootstrap automation.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
+- 2026-02-09 `[CODE]` Split CI API checks into `api-fast` and `api-integration-db`, and documented required branch checks in `README.md`.
 - 2026-02-09 `[CODE]` Captured Supabase human role provisioning conventions in runbook (`app_metadata.role|sj_role|roles[]`) for deterministic moderator/admin assignment.
 - 2026-02-09 `[CODE]` Added D2 reliability transitions (lease reaper endpoint + bounded retry/dead-letter) and worker-triggered lease reaping on polling loop.
 - 2026-02-09 `[CODE]` Added moderation APIs (`GET/PATCH /candidates`) with trusted Supabase `app_metadata` role enforcement, transition validation, and posting lifecycle coupling.
 - 2026-02-09 `[CODE]` Expanded public postings contract with detail endpoint and list search/filter/sort/pagination behavior.
 - 2026-02-09 `[CODE]` Added moderation merge + override workflows (`POST /candidates/{id}/merge|override`) with candidate/posting audit event retrieval.
 - 2026-02-09 `[CODE]` Hardened postings list semantics for whitespace-only filters, case-insensitive tag filtering, deterministic sort tie-breaks, and null-last `deadline/published_at` ordering with DB-backed integration tests.
-- 2026-02-08 `[CODE]` Added local Postgres compose workflow + reset/apply script fallbacks (`make db-up/reset/test-integration/db-down`) for host-without-psql environments.
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
@@ -48,3 +48,4 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-09 `[TOOL]` `SJ_DATABASE_URL=... SJ_JOB_RETRY_BASE_SECONDS=0 uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py` passed (`12/12`, includes moderation merge/conflict/override + audit coverage).
 - 2026-02-09 `[TOOL]` `SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "postings_list_reads_from_database or postings_filters_sort_pagination_and_detail or postings_edge_query_semantics_and_deterministic_tie_breaks"` passed (`3/3`).
 - 2026-02-09 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -> make db-down` passed (`13/13`).
+- 2026-02-09 `[TOOL]` `uv run --project api --extra dev pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py` passed (`11/11`).

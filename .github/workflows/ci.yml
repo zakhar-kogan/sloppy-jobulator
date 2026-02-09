@@ -22,7 +22,30 @@ on:
   workflow_dispatch:
 
 jobs:
-  api:
+  api-fast:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install API deps
+        run: pip install -e "./api[dev]"
+
+      - name: API lint
+        run: ruff check api
+
+      - name: API typecheck
+        run: mypy api/app
+
+      - name: API fast tests (exclude DB-backed integration)
+        run: pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py
+
+  api-integration-db:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -62,14 +85,8 @@ jobs:
       - name: Apply schema and seed
         run: bash scripts/apply_db_schema.sh
 
-      - name: API lint
-        run: ruff check api
-
-      - name: API typecheck
-        run: mypy api/app
-
-      - name: API tests
-        run: pytest api/tests
+      - name: API DB-backed integration tests
+        run: pytest api/tests/test_discovery_jobs_integration.py
 
   workers:
     runs-on: ubuntu-latest

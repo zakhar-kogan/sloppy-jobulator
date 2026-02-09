@@ -37,6 +37,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Add API integration tests for discovery->job claim/result flow and CI Postgres provisioning.
 - [x] Add local Postgres compose/make workflow and extend integration coverage to postings list path.
 - [x] Harden postings list edge semantics (trimmed filters, case-insensitive tag match, deterministic tie-breaks, null-last deadline/published sorts) with integration coverage.
+- [x] Split CI into fast checks vs DB-backed integration required checks (`M1 + L1`).
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
@@ -53,6 +54,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-09: Added moderation merge/override execution paths with provenance audit retrieval and DB-backed conflict/override integration coverage.
 - 2026-02-09: Documented Supabase role-provisioning conventions in runbook so elevated role assignment is deterministic and aligned with API claim resolution.
 - 2026-02-09: Hardened `G1` query semantics for whitespace-only filters, case-insensitive tag filtering, deterministic sort tie-break behavior, and null-last handling for `deadline/published_at` with DB-backed test assertions.
+- 2026-02-09: Split CI API checks into `api-fast` and `api-integration-db`; documented required branch checks in README.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -84,5 +86,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Split fast vs DB-backed integration checks in CI and enforce required branch checks (`M1 + L1`).
-2. Start role/bootstrap automation (`A3`) and trust-policy publication logic (`F2`).
+1. Start role/bootstrap automation (`A3`) and trust-policy publication logic (`F2`).
