@@ -14,8 +14,8 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `E3+E4` baseline landed with deterministic dedupe scoring, machine merge-policy decisions, auto-merge for high-confidence matches, and review-queue routing for uncertain/conflicting candidates.
-Next: Expand `F2` trust-policy automation to consume richer merge-policy outcomes and source-specific moderation routing rules.
+Now: `F2` trust-policy routing now consumes merge-policy outcomes with policy-configurable merge actions/reasons/moderation routes and explicit `rejected` handling.
+Next: Expose/administer `source_trust_policy.rules_json` merge-routing keys and extend edge coverage for auto-merge-blocked conflict paths.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
@@ -24,8 +24,8 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[CODE]` Added shared merge execution helper so manual moderator merges and machine auto-merges share consistent `candidate_merge_decisions` + provenance behavior.
 - 2026-02-10 `[CODE]` Added auto-merge short-circuit to keep canonical posting ownership stable while archiving secondary candidates and retaining discovery/evidence links on the primary.
 - 2026-02-10 `[CODE]` Added review-routing override so uncertain/conflicting dedupe outcomes force moderation queue state even when trust-policy would otherwise auto-publish.
-- 2026-02-10 `[CODE]` Added unit coverage for dedupe scorer thresholds/conflict guards and DB-backed integration coverage for machine auto-merge + review-queue routing.
-- 2026-02-10 `[CODE]` Maintained existing trust-policy event contract while extending payload receipts with merge-policy decision metadata.
+- 2026-02-10 `[CODE]` Expanded `source_trust_policy` merge routing to apply policy-configurable `merge_decision_actions`/`merge_decision_reasons`/`moderation_routes` and default `rejected` handling.
+- 2026-02-10 `[CODE]` Added DB-backed integration coverage for source-specific overrides on dedupe `needs_review` and `rejected` outcomes.
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
@@ -50,3 +50,6 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/app/services/repository.py api/app/services/dedupe.py api/tests/test_dedupe_scorer.py api/tests/test_discovery_jobs_integration.py` and `uv run --project api --extra dev mypy api/app` passed.
 - 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "dedupe_policy_auto_merges_high_confidence_duplicate_candidate or dedupe_policy_routes_uncertain_match_to_review_queue" -> make db-down` passed (`2/2` selected).
 - 2026-02-10 `[TOOL]` `bash scripts/agent-hygiene-check.sh --mode project` passed.
+- 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/app/services/repository.py api/tests/test_discovery_jobs_integration.py` and `uv run --project api --extra dev mypy api/app/services/repository.py` passed.
+- 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> (escalated) SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "override_needs_review_merge_route_for_source or override_rejected_merge_route_for_source" -> (escalated) ... -k "dedupe_policy or trust_policy" -> make db-down` passed (`2/2` selected, then `8/8` selected).
+- 2026-02-10 `[TOOL]` `make lint` and `make typecheck` failed on host (`ruff`/`mypy` missing in PATH); equivalent `uv run --project api --extra dev` checks passed for touched API files.

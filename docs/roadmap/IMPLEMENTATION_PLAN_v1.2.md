@@ -33,7 +33,7 @@
 | E3 | done | Dedupe scorer v1 now computes deterministic merge confidence from strong/medium/tie-break signals (URL/hash, text similarity, NER/contact-domain overlap). |
 | E4 | done | Merge policy routing now records machine decisions (`auto_merged`/`needs_review`/`rejected`), auto-applies high-confidence merges, and routes uncertain/conflicting matches to moderation with provenance. |
 | F1 | done | Moderation APIs now cover approve/reject (state patch), merge, and override flows with role checks + audit events. |
-| F2 | in_progress | `source_trust_policy` routing now drives trusted/semi/untrusted publication paths with DB-backed integration coverage; broader policy automation remains pending. |
+| F2 | in_progress | `source_trust_policy` routing now drives trusted/semi/untrusted publication paths and merge-outcome actions (`needs_review`/`rejected`/`auto_merged`) with source-specific moderation-route receipts; broader policy automation remains pending. |
 | F3 | done | Posting lifecycle transitions are now explicit via moderated `PATCH /postings/{id}` with transition guards, candidate synchronization, provenance writes, and DB-backed integration coverage. |
 | G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
 | G2 | done | Freshness scheduler endpoint + worker cadence now enqueue `check_freshness` jobs; result/dead-letter paths apply deterministic posting downgrade/archive transitions with provenance and integration coverage. |
@@ -55,9 +55,9 @@
 
 ## Next Implementation Steps (Priority Order)
 
-1. Expand `F2` trust-policy automation to consume richer merge-policy metadata and source-specific routing rules.
-- Add policy options for handling dedupe `needs_review` outcomes by source/trust class.
-- Harden publish routing with additional policy receipts and integration coverage for mixed trust + dedupe edge cases.
+1. Continue `F2` trust-policy automation hardening around operator ergonomics and policy management surfaces.
+- Document/admin-surface the new `rules_json` merge routing keys (`merge_decision_actions`, `merge_decision_reasons`, `moderation_routes`).
+- Extend integration coverage for additional mixed trust + dedupe edge cases (including auto-merge fallback conflict paths).
 
 ## Workstreams and Task Graph
 

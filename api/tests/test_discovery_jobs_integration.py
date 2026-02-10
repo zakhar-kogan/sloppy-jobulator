@@ -1609,6 +1609,216 @@ def test_trust_policy_uses_source_key_override(
     assert applied_source_key == "tests:force-review"
 
 
+def test_trust_policy_can_override_needs_review_merge_route_for_source(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    _run(
+        _upsert_source_trust_policy(
+            database_url,
+            source_key="tests:merge-needs-review",
+            trust_level="trusted",
+            auto_publish=True,
+            requires_moderation=False,
+            rules_json={
+                "min_confidence": 0.0,
+                "merge_decision_actions": {"needs_review": "reject"},
+                "merge_decision_reasons": {"needs_review": "policy_merge_needs_review_reject"},
+                "moderation_routes": {"needs_review": "dedupe.manual_triage"},
+            },
+        )
+    )
+
+    primary_candidate_id, _ = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-policy-needs-review-primary",
+        canonical_hash="policy-needs-review-primary-hash",
+    )
+    secondary_candidate_id, secondary_posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-policy-needs-review-secondary",
+        canonical_hash="policy-needs-review-secondary-hash",
+        source_key="tests:merge-needs-review",
+    )
+
+    merge_decision = _run(
+        _fetchval(
+            database_url,
+            """
+            select decision::text
+            from candidate_merge_decisions
+            where primary_candidate_id = $1::uuid
+              and secondary_candidate_id = $2::uuid
+            order by created_at desc
+            limit 1
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+        )
+    )
+    secondary_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            secondary_candidate_id,
+        )
+    )
+    posting_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            secondary_posting_id,
+        )
+    )
+    trust_policy_reason = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'reason'
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'trust_policy_applied'
+            order by id desc
+            limit 1
+            """,
+            secondary_candidate_id,
+        )
+    )
+    moderation_route = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'moderation_route'
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'trust_policy_applied'
+            order by id desc
+            limit 1
+            """,
+            secondary_candidate_id,
+        )
+    )
+
+    assert merge_decision == "needs_review"
+    assert secondary_state == "rejected"
+    assert posting_status == "archived"
+    assert trust_policy_reason == "policy_merge_needs_review_reject"
+    assert moderation_route == "dedupe.manual_triage"
+
+
+def test_trust_policy_can_override_rejected_merge_route_for_source(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    _run(
+        _upsert_source_trust_policy(
+            database_url,
+            source_key="tests:merge-rejected",
+            trust_level="trusted",
+            auto_publish=True,
+            requires_moderation=False,
+            rules_json={
+                "min_confidence": 0.0,
+                "merge_decision_actions": {"rejected": "needs_review"},
+                "merge_decision_reasons": {"rejected": "policy_merge_rejected_review"},
+                "moderation_routes": {"rejected": "dedupe.source_risk_review"},
+            },
+        )
+    )
+
+    primary_candidate_id, _ = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-policy-rejected-primary",
+        canonical_hash="policy-rejected-primary-hash",
+        title="Research Scientist Fellowship",
+        organization_name="Example University Research Lab",
+        tags=["science"],
+        application_url="https://example.edu/apply/shared-form",
+    )
+    secondary_candidate_id, secondary_posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-policy-rejected-secondary",
+        canonical_hash="policy-rejected-secondary-hash",
+        source_key="tests:merge-rejected",
+        title="Research Engineer Fellowship",
+        organization_name="Example University Research Lab",
+        tags=["engineering"],
+        application_url="https://example.edu/apply/shared-form",
+    )
+
+    merge_decision = _run(
+        _fetchval(
+            database_url,
+            """
+            select decision::text
+            from candidate_merge_decisions
+            where primary_candidate_id = $1::uuid
+              and secondary_candidate_id = $2::uuid
+            order by created_at desc
+            limit 1
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+        )
+    )
+    secondary_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            secondary_candidate_id,
+        )
+    )
+    posting_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            secondary_posting_id,
+        )
+    )
+    trust_policy_reason = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'reason'
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'trust_policy_applied'
+            order by id desc
+            limit 1
+            """,
+            secondary_candidate_id,
+        )
+    )
+    moderation_route = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'moderation_route'
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'trust_policy_applied'
+            order by id desc
+            limit 1
+            """,
+            secondary_candidate_id,
+        )
+    )
+
+    assert merge_decision == "rejected"
+    assert secondary_state == "needs_review"
+    assert posting_status == "archived"
+    assert trust_policy_reason == "policy_merge_rejected_review"
+    assert moderation_route == "dedupe.source_risk_review"
+
+
 def _configure_mock_human_auth(monkeypatch: pytest.MonkeyPatch, *, role: str, user_id: str) -> None:
     monkeypatch.setenv("SJ_SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SJ_SUPABASE_ANON_KEY", "anon-key")
@@ -1630,6 +1840,10 @@ def _create_projected_candidate_and_posting(
     dedupe_confidence: float = 0.99,
     risk_flags: list[str] | None = None,
     source_key: str | None = None,
+    title: str = "Moderation Candidate",
+    organization_name: str = "Example University",
+    tags: list[str] | None = None,
+    application_url: str | None = None,
 ) -> tuple[str, str]:
     module_id = connector_headers["X-Module-Id"]
     metadata: dict[str, Any] = {"source": "integration-test"}
@@ -1674,14 +1888,15 @@ def _create_projected_candidate_and_posting(
                 "risk_flags": risk_flags or [],
                 "source_key": source_key,
                 "posting": {
-                    "title": "Moderation Candidate",
-                    "organization_name": "Example University",
+                    "title": title,
+                    "organization_name": organization_name,
                     "canonical_url": f"https://example.edu/jobs/{external_id}",
                     "normalized_url": f"https://example.edu/jobs/{external_id}",
                     "canonical_hash": canonical_hash,
                     "country": "US",
                     "remote": True,
-                    "tags": ["ml"],
+                    "tags": tags or ["ml"],
+                    "application_url": application_url,
                     "source_refs": [{"kind": "discovery", "id": discovery_id}],
                 }
             },
