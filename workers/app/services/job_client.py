@@ -57,3 +57,14 @@ class JobClient:
             response.raise_for_status()
             payload = response.json()
             return int(payload.get("requeued", 0))
+
+    async def enqueue_freshness_jobs(self, limit: int = 100) -> int:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{self.base_url}/jobs/enqueue-freshness",
+                params={"limit": limit},
+                headers=self.headers,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            return int(payload.get("enqueued", 0))

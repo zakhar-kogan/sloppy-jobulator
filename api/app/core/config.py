@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     job_max_attempts: int = 3
     job_retry_base_seconds: int = 30
     job_retry_max_seconds: int = 600
+    freshness_check_interval_hours: int = 24
+    freshness_stale_after_hours: int = 24
+    freshness_archive_after_hours: int = 72
     supabase_url: str | None = None
     supabase_anon_key: str | None = None
     auth_timeout_seconds: float = 5.0

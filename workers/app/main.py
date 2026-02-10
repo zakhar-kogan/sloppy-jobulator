@@ -19,6 +19,7 @@ async def run_worker() -> None:
 
     backoff = settings.poll_interval_seconds
     last_reap_at = 0.0
+    last_freshness_enqueue_at = 0.0
 
     while True:
         try:
@@ -28,6 +29,12 @@ async def run_worker() -> None:
                 if requeued:
                     print(f"requeued expired leases: {requeued}")
                 last_reap_at = now
+
+            if now - last_freshness_enqueue_at >= settings.freshness_enqueue_interval_seconds:
+                enqueued = await client.enqueue_freshness_jobs(limit=settings.freshness_enqueue_batch_size)
+                if enqueued:
+                    print(f"enqueued freshness jobs: {enqueued}")
+                last_freshness_enqueue_at = now
 
             jobs = await client.get_jobs(limit=5)
             if not jobs:

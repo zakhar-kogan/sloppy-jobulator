@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     claim_lease_seconds: int = 120
     lease_reaper_interval_seconds: float = 15.0
     lease_reaper_batch_size: int = 100
+    freshness_enqueue_interval_seconds: float = 300.0
+    freshness_enqueue_batch_size: int = 100
 
     model_config = SettingsConfigDict(env_prefix="SJ_WORKER_", extra="ignore")
 

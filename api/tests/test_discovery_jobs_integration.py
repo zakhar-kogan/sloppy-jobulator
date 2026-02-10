@@ -388,6 +388,221 @@ def test_failed_results_retry_then_dead_letter(api_client: TestClient, database_
     assert dead_letter_event_count == 1
 
 
+def test_enqueue_freshness_jobs_and_apply_machine_status_transitions(api_client: TestClient, database_url: str) -> None:
+    active_candidate_id, active_posting_id = _run(
+        _insert_candidate_and_posting(
+            database_url,
+            canonical_hash="freshness-active-hash",
+            status="active",
+            candidate_state="published",
+        )
+    )
+    stale_candidate_id, stale_posting_id = _run(
+        _insert_candidate_and_posting(
+            database_url,
+            canonical_hash="freshness-stale-hash",
+            status="stale",
+            candidate_state="published",
+        )
+    )
+
+    enqueue_response = api_client.post(
+        "/jobs/enqueue-freshness",
+        params={"limit": 10},
+        headers=PROCESSOR_HEADERS,
+    )
+    assert enqueue_response.status_code == 200
+    assert enqueue_response.json()["enqueued"] == 2
+
+    duplicate_enqueue_response = api_client.post(
+        "/jobs/enqueue-freshness",
+        params={"limit": 10},
+        headers=PROCESSOR_HEADERS,
+    )
+    assert duplicate_enqueue_response.status_code == 200
+    assert duplicate_enqueue_response.json()["enqueued"] == 0
+
+    jobs_response = api_client.get("/jobs", headers=PROCESSOR_HEADERS)
+    assert jobs_response.status_code == 200
+    jobs = jobs_response.json()
+    assert len(jobs) == 2
+    assert {job["kind"] for job in jobs} == {"check_freshness"}
+
+    for job in jobs:
+        claim_response = api_client.post(
+            f"/jobs/{job['id']}/claim",
+            json={"lease_seconds": 120},
+            headers=PROCESSOR_HEADERS,
+        )
+        assert claim_response.status_code == 200
+
+        target_status = "stale" if job["target_id"] == active_posting_id else "archived"
+        result_response = api_client.post(
+            f"/jobs/{job['id']}/result",
+            json={
+                "status": "done",
+                "result_json": {
+                    "recommended_status": target_status,
+                    "reason": "integration-freshness",
+                },
+            },
+            headers=PROCESSOR_HEADERS,
+        )
+        assert result_response.status_code == 200
+        assert result_response.json()["status"] == "done"
+
+    active_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            active_posting_id,
+        )
+    )
+    assert active_status == "stale"
+
+    stale_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            stale_posting_id,
+        )
+    )
+    assert stale_status == "archived"
+
+    active_candidate_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            active_candidate_id,
+        )
+    )
+    assert active_candidate_state == "published"
+
+    stale_candidate_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            stale_candidate_id,
+        )
+    )
+    assert stale_candidate_state == "archived"
+
+    machine_status_change_events = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from provenance_events
+            where entity_type = 'posting'
+              and event_type = 'status_changed'
+              and actor_type = 'machine'
+              and payload->>'source' = 'check_freshness_job'
+            """,
+        )
+    )
+    assert machine_status_change_events == 2
+
+
+def test_freshness_dead_letter_downgrades_posting_after_retries(api_client: TestClient, database_url: str) -> None:
+    candidate_id, posting_id = _run(
+        _insert_candidate_and_posting(
+            database_url,
+            canonical_hash="freshness-dead-letter-hash",
+            status="active",
+            candidate_state="published",
+        )
+    )
+
+    enqueue_response = api_client.post(
+        "/jobs/enqueue-freshness",
+        params={"limit": 10},
+        headers=PROCESSOR_HEADERS,
+    )
+    assert enqueue_response.status_code == 200
+    assert enqueue_response.json()["enqueued"] == 1
+
+    jobs_response = api_client.get("/jobs", headers=PROCESSOR_HEADERS)
+    assert jobs_response.status_code == 200
+    jobs = jobs_response.json()
+    assert len(jobs) == 1
+    job_id = jobs[0]["id"]
+    assert jobs[0]["kind"] == "check_freshness"
+    assert jobs[0]["target_id"] == posting_id
+
+    expected_statuses = ["queued", "queued", "dead_letter"]
+    for expected_status in expected_statuses:
+        claim_response = api_client.post(
+            f"/jobs/{job_id}/claim",
+            json={"lease_seconds": 120},
+            headers=PROCESSOR_HEADERS,
+        )
+        assert claim_response.status_code == 200
+        assert claim_response.json()["status"] == "claimed"
+
+        result_response = api_client.post(
+            f"/jobs/{job_id}/result",
+            json={
+                "status": "failed",
+                "error_json": {"reason": "freshness-check-timeout"},
+            },
+            headers=PROCESSOR_HEADERS,
+        )
+        assert result_response.status_code == 200
+        assert result_response.json()["status"] == expected_status
+        if expected_status == "queued":
+            _run(_execute(database_url, "update jobs set next_run_at = now() where id = $1::uuid", job_id))
+
+    posting_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            posting_id,
+        )
+    )
+    assert posting_status == "stale"
+
+    candidate_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            candidate_id,
+        )
+    )
+    assert candidate_state == "published"
+
+    retry_exhausted_events = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from provenance_events
+            where entity_type = 'job'
+              and entity_id = $1::uuid
+              and event_type = 'freshness_retry_exhausted'
+            """,
+            job_id,
+        )
+    )
+    assert retry_exhausted_events == 1
+
+    machine_status_change_events = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from provenance_events
+            where entity_type = 'posting'
+              and entity_id = $1::uuid
+              and event_type = 'status_changed'
+              and actor_type = 'machine'
+              and payload->>'source' = 'check_freshness_dead_letter'
+            """,
+            posting_id,
+        )
+    )
+    assert machine_status_change_events == 1
+
+
 def test_postings_list_reads_from_database(api_client: TestClient, database_url: str) -> None:
     posting_id = _run(
         _fetchval(
@@ -1337,6 +1552,66 @@ def _create_projected_candidate_and_posting(
     assert candidate_id
     assert posting_id
     return candidate_id, posting_id
+
+
+async def _insert_candidate_and_posting(
+    database_url: str,
+    *,
+    canonical_hash: str,
+    status: str,
+    candidate_state: str,
+) -> tuple[str, str]:
+    conn = await asyncpg.connect(database_url)
+    try:
+        candidate_id = await conn.fetchval(
+            """
+            insert into posting_candidates (
+              state,
+              dedupe_bucket_key,
+              extracted_fields
+            )
+            values ($1::candidate_state, $2, '{}'::jsonb)
+            returning id::text
+            """,
+            candidate_state,
+            canonical_hash,
+        )
+        posting_id = await conn.fetchval(
+            """
+            insert into postings (
+              candidate_id,
+              title,
+              canonical_url,
+              normalized_url,
+              canonical_hash,
+              organization_name,
+              status,
+              published_at,
+              created_at,
+              updated_at
+            )
+            values (
+              $1::uuid,
+              'Freshness Candidate',
+              $2,
+              $2,
+              $3,
+              'Example University',
+              $4::posting_status,
+              now() - interval '3 days',
+              now() - interval '3 days',
+              now() - interval '3 days'
+            )
+            returning id::text
+            """,
+            candidate_id,
+            f"https://example.edu/jobs/{canonical_hash}",
+            canonical_hash,
+            status,
+        )
+        return candidate_id, posting_id
+    finally:
+        await conn.close()
 
 
 def _run(coro: Coroutine[Any, Any, T]) -> T:

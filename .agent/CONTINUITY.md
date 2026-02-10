@@ -14,18 +14,18 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `F3` baseline landed with moderated posting lifecycle transitions (`active/stale/archived/closed`) and DB-backed integration coverage; `A3/F2` remains complete on `main`.
-Next: Implement `G2` freshness checker jobs (scheduled `check_freshness` execution, bounded retries, and automated downgrade/archive transitions).
+Now: `G2` baseline landed with scheduled freshness enqueue (`/jobs/enqueue-freshness`), worker `check_freshness` execution, and automated dead-letter downgrade/archive transitions plus provenance coverage.
+Next: Implement `E3` dedupe scorer v1 and connect confidence/risk outputs to `E4` merge policy routing.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
+- 2026-02-10 `[CODE]` Added `POST /jobs/enqueue-freshness` with DB-backed due-posting scheduler and duplicate suppression for pending freshness jobs.
+- 2026-02-10 `[CODE]` Added `check_freshness` result/dead-letter handling in repository to apply deterministic machine-driven posting transitions (`active->stale`, `stale->archived`) with candidate-state sync + provenance events.
+- 2026-02-10 `[CODE]` Added worker freshness automation loop (`enqueue_freshness_jobs`) and `check_freshness` evaluator dispatch with configurable stale/archive thresholds.
+- 2026-02-10 `[CODE]` Added DB-backed integration coverage for freshness enqueue + machine transitions and retry-exhausted downgrade path.
 - 2026-02-10 `[CODE]` Added `PATCH /postings/{posting_id}` with moderated human auth and posting lifecycle payload contract.
-- 2026-02-10 `[CODE]` Implemented repository posting status transition guards and deterministic candidate-state sync (`active|stale -> published`, `archived`, `closed`).
-- 2026-02-10 `[CODE]` Added provenance writes for posting `status_changed` and candidate `state_changed` when lifecycle patch mutates linked candidate state.
 - 2026-02-10 `[CODE]` Added DB-backed integration coverage for posting lifecycle path (`active -> stale -> archived -> active`) and invalid transition conflict (`closed -> active`).
-- 2026-02-09 `[CODE]` Added deterministic Supabase role bootstrap SQL generator (`scripts/bootstrap_admin.py --user-id|--email --role`) and tests.
 - 2026-02-09 `[CODE]` Added F2 trust-policy publication routing via `source_trust_policy` with provenance event writes (`trust_policy_applied`).
-- 2026-02-09 `[CODE]` Split CI API checks into `api-fast` and `api-integration-db`, then enforced required checks via branch protection.
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
@@ -36,21 +36,13 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-08 `[CODE]` D-001 through D-004 active in `.agent/DECISIONS.md`.
 
 ## Receipts
-- 2026-02-08 `[TOOL]` `make db-up` succeeded after OrbStack start (requires escalated sandbox access to Docker socket).
-- 2026-02-08 `[TOOL]` `make db-reset` now works without host `psql` via compose fallback (`scripts/reset_db.sh` + `scripts/apply_db_schema.sh`).
-- 2026-02-08 `[TOOL]` `make test-integration` passed with 3/3 integration tests against local Postgres container.
-- 2026-02-08 `[TOOL]` `make lint && make typecheck && make test && make build` and `bash scripts/agent-hygiene-check.sh --mode project` passed.
-- 2026-02-09 `[TOOL]` `uv run --project api --extra dev ruff check ...` and `uv run --project api --extra dev mypy api/app/services/repository.py` passed.
-- 2026-02-09 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -> make db-down` passed (3/3 integration tests).
-- 2026-02-09 `[TOOL]` `uv run --project workers --extra dev pytest workers/tests` passed (`2/2`).
-- 2026-02-09 `[TOOL]` `SJ_DATABASE_URL=... SJ_JOB_RETRY_BASE_SECONDS=0 uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py` passed (`5/5`, includes D2 cases).
-- 2026-02-09 `[TOOL]` `uv run --project api --extra dev pytest api/tests/test_candidates_authz.py api/tests/test_health.py` passed (`11/11`, includes merge/override authz coverage).
-- 2026-02-09 `[TOOL]` `SJ_DATABASE_URL=... SJ_JOB_RETRY_BASE_SECONDS=0 uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py` passed (`12/12`, includes moderation merge/conflict/override + audit coverage).
-- 2026-02-09 `[TOOL]` `SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "postings_list_reads_from_database or postings_filters_sort_pagination_and_detail or postings_edge_query_semantics_and_deterministic_tie_breaks"` passed (`3/3`).
-- 2026-02-09 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -> make db-down` passed (`13/13`).
-- 2026-02-09 `[TOOL]` `uv run --project api --extra dev pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py` passed (`11/11`).
-- 2026-02-09 `[TOOL]` `uv run --project api --extra dev pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py` passed (`13/13`, includes bootstrap-script tests).
 - 2026-02-09 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -> make db-down` passed (`17/17`, includes trust-policy routing coverage).
+- 2026-02-09 `[TOOL]` `uv run --project api --extra dev pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py` passed (`13/13`, includes bootstrap-script tests).
 - 2026-02-09 `[TOOL]` `gh run list --branch main --limit 6` confirms post-merge `main` checks passed (`CI` run `21835425786`, `Agent Hygiene` run `21835425797`).
 - 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "posting_lifecycle_patch or moderation_candidate_state_transitions_update_posting_status" -> make db-down` passed (`3/3` selected).
-- 2026-02-10 `[TOOL]` `uv run --project api --extra dev pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py` passed (`15/15`, includes posting patch authz tests); `uv run --project api --extra dev ruff check api/app api/tests && uv run --project api --extra dev mypy api/app` passed.
+- 2026-02-10 `[TOOL]` `uv run --project api --extra dev pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py` passed (`15/15`, includes posting patch authz tests).
+- 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/app api/tests && uv run --project api --extra dev mypy api/app` passed.
+- 2026-02-10 `[TOOL]` `uv run --project workers --extra dev pytest workers/tests -q` passed (`6/6`, includes freshness evaluator coverage).
+- 2026-02-10 `[TOOL]` `UV_CACHE_DIR=/tmp/uv-cache uv run --project api --extra dev ruff check ...` and `UV_CACHE_DIR=/tmp/uv-cache uv run --project workers --extra dev ruff check ...` passed for changed freshness files.
+- 2026-02-10 `[TOOL]` `UV_CACHE_DIR=/tmp/uv-cache uv run --project api --extra dev mypy api/app` and `UV_CACHE_DIR=/tmp/uv-cache uv run --project workers --extra dev mypy workers/app` passed.
+- 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "enqueue_freshness_jobs or freshness_dead_letter" -> make db-down` passed (`2/2` selected).

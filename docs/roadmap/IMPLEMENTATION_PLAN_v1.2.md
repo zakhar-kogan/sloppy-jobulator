@@ -5,7 +5,7 @@
 - Complexity: `S` (1-2 days), `M` (3-5 days), `L` (1-2 weeks), `XL` (2+ weeks).
 - Order: lower number means earlier on optimal critical path.
 
-## Status Snapshot (2026-02-09)
+## Status Snapshot (2026-02-10)
 
 ### Status legend
 - `done`: implemented and validated in current repo/CI.
@@ -27,7 +27,7 @@
 | C3 | done | `extract` job completion now materializes `posting_candidates` + discovery/evidence links with provenance writes. |
 | D1 | done | Job ledger API (`GET/claim/result`) is DB-backed. |
 | D2 | done | Expired-lease requeue endpoint exists and workers trigger it periodically; failed results now follow bounded retry then dead-letter transitions. |
-| D3 | in_progress | Worker scaffold exists; structured logs/OTel and richer execution semantics are pending. |
+| D3 | in_progress | Worker runtime now dispatches `check_freshness` with periodic scheduler-triggered enqueue, while structured logs/OTel and richer execution semantics are pending. |
 | E1 | in_progress | Base URL normalization/hash logic exists; per-domain override support is pending. |
 | E2 | not_started | Redirect resolution async job path is not implemented. |
 | E3 | not_started | Dedupe scorer is not implemented. |
@@ -36,7 +36,7 @@
 | F2 | in_progress | `source_trust_policy` routing now drives trusted/semi/untrusted publication paths with DB-backed integration coverage; broader policy automation remains pending. |
 | F3 | done | Posting lifecycle transitions are now explicit via moderated `PATCH /postings/{id}` with transition guards, candidate synchronization, provenance writes, and DB-backed integration coverage. |
 | G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
-| G2 | not_started | Freshness checker job flow not implemented. |
+| G2 | done | Freshness scheduler endpoint + worker cadence now enqueue `check_freshness` jobs; result/dead-letter paths apply deterministic posting downgrade/archive transitions with provenance and integration coverage. |
 | H1 | in_progress | Minimal Next.js public shell exists; full catalogue UX pending. |
 | H2 | not_started | Admin/moderator UI not implemented. |
 | I1 | not_started | TaskRouter abstraction not implemented. |
@@ -48,16 +48,16 @@
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, moderation authz/state/merge/override, and posting lifecycle patch transitions; CI now runs DB-backed integration as a separate required job, while end-to-end UI moderation tests remain pending. |
+| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, freshness enqueue/dead-letter downgrade flow, moderation authz/state/merge/override, and posting lifecycle patch transitions; CI now runs DB-backed integration as a separate required job, while end-to-end UI moderation tests remain pending. |
 | L2 | not_started | Load/perf testing not implemented. |
 | M1 | in_progress | Quality CI is split into fast and DB-backed integration required checks; full deploy + migration gate pipeline remains pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
 
 ## Next Implementation Steps (Priority Order)
 
-1. Implement `G2` freshness checks and archive transitions.
-- Add scheduled freshness checker jobs with bounded retries before downgrade/archive.
-- Ensure lifecycle updates are deterministic and auditable with provenance receipts.
+1. Implement `E3` dedupe scorer v1 and wire confidence/risk outputs into `E4` merge policy paths.
+- Add precision-first scorer thresholds and deterministic confidence outputs for merge/no-merge/review decisions.
+- Extend moderation review-queue routing for uncertain matches with provenance receipts tied to merge decisions.
 
 ## Workstreams and Task Graph
 

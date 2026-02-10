@@ -59,6 +59,9 @@ class PostgresRepository:
         job_max_attempts: int,
         job_retry_base_seconds: int,
         job_retry_max_seconds: int,
+        freshness_check_interval_hours: int,
+        freshness_stale_after_hours: int,
+        freshness_archive_after_hours: int,
     ) -> None:
         self.database_url = database_url
         self.min_pool_size = min_pool_size
@@ -66,6 +69,9 @@ class PostgresRepository:
         self.job_max_attempts = max(1, job_max_attempts)
         self.job_retry_base_seconds = max(0, job_retry_base_seconds)
         self.job_retry_max_seconds = max(0, job_retry_max_seconds)
+        self.freshness_check_interval_hours = max(1, freshness_check_interval_hours)
+        self.freshness_stale_after_hours = max(1, freshness_stale_after_hours)
+        self.freshness_archive_after_hours = max(self.freshness_stale_after_hours, freshness_archive_after_hours)
         self._pool: asyncpg.Pool | None = None
 
     async def close(self) -> None:
@@ -454,6 +460,89 @@ class PostgresRepository:
                     )
                 return len(rows)
 
+    async def enqueue_due_freshness_jobs(self, module_db_id: str, limit: int) -> int:
+        pool = await self._get_pool()
+        bounded_limit = max(1, min(limit, 1000))
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                rows = await conn.fetch(
+                    """
+                    with due_postings as (
+                      select p.id, p.status::text as status, p.updated_at, p.created_at
+                      from postings p
+                      where p.status in ('active', 'stale')
+                        and not exists (
+                          select 1
+                          from jobs pending
+                          where pending.kind = 'check_freshness'
+                            and pending.target_type = 'posting'
+                            and pending.target_id = p.id
+                            and pending.status in ('queued', 'claimed')
+                        )
+                        and not exists (
+                          select 1
+                          from jobs recent
+                          where recent.kind = 'check_freshness'
+                            and recent.target_type = 'posting'
+                            and recent.target_id = p.id
+                            and recent.status in ('done', 'failed', 'dead_letter')
+                            and recent.updated_at > now() - ($2::int * interval '1 hour')
+                        )
+                      order by p.updated_at asc, p.created_at asc
+                      limit $1
+                      for update skip locked
+                    )
+                    insert into jobs (kind, target_type, target_id, inputs_json, next_run_at)
+                    select
+                      'check_freshness',
+                      'posting',
+                      due.id,
+                      jsonb_build_object(
+                        'posting_id', due.id::text,
+                        'posting_status', due.status,
+                        'posting_updated_at', due.updated_at,
+                        'stale_after_hours', $3::int,
+                        'archive_after_hours', $4::int
+                      ),
+                      now()
+                    from due_postings due
+                    returning
+                      id::text as id,
+                      target_id::text as target_id
+                    """,
+                    bounded_limit,
+                    self.freshness_check_interval_hours,
+                    self.freshness_stale_after_hours,
+                    self.freshness_archive_after_hours,
+                )
+
+                for row in rows:
+                    await conn.execute(
+                        """
+                        insert into provenance_events (
+                          entity_type,
+                          entity_id,
+                          event_type,
+                          actor_type,
+                          actor_id,
+                          payload
+                        )
+                        values ('job', $1::uuid, 'freshness_enqueued', 'machine', $2::uuid, $3::jsonb)
+                        """,
+                        row["id"],
+                        module_db_id,
+                        json.dumps(
+                            {
+                                "posting_id": row["target_id"],
+                                "freshness_check_interval_hours": self.freshness_check_interval_hours,
+                                "stale_after_hours": self.freshness_stale_after_hours,
+                                "archive_after_hours": self.freshness_archive_after_hours,
+                            }
+                        ),
+                    )
+                return len(rows)
+
     async def submit_job_result(
         self,
         job_id: str,
@@ -546,6 +635,23 @@ class PostgresRepository:
                             actor_module_db_id=module_db_id,
                             result_json=result_json,
                         )
+                    if row["kind"] == "check_freshness" and row["target_type"] == "posting" and row["target_id"]:
+                        if row["status"] == "done":
+                            await self._apply_freshness_job_result(
+                                conn=conn,
+                                job_id=row["id"],
+                                posting_id=row["target_id"],
+                                actor_module_db_id=module_db_id,
+                                result_json=result_json,
+                            )
+                        elif row["status"] == "dead_letter":
+                            await self._apply_freshness_dead_letter_fallback(
+                                conn=conn,
+                                job_id=row["id"],
+                                posting_id=row["target_id"],
+                                actor_module_db_id=module_db_id,
+                                attempt=attempt,
+                            )
 
                     await conn.execute(
                         """
@@ -1630,6 +1736,260 @@ class PostgresRepository:
         except (pg_exc.InvalidTextRepresentationError, asyncpg.DataError) as exc:
             raise RepositoryNotFoundError("posting not found") from exc
 
+    async def _apply_freshness_job_result(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        job_id: str,
+        posting_id: str,
+        actor_module_db_id: str,
+        result_json: dict[str, Any] | None,
+    ) -> None:
+        payload = result_json if isinstance(result_json, dict) else {}
+        recommended_status = self._coerce_text(payload.get("recommended_status"))
+        reason = self._coerce_text(payload.get("reason")) or "freshness_check"
+
+        applied = False
+        if recommended_status in {"active", "stale", "archived", "closed"}:
+            applied = await self._apply_machine_posting_status_transition(
+                conn=conn,
+                posting_id=posting_id,
+                to_status=recommended_status,
+                actor_module_db_id=actor_module_db_id,
+                reason=reason,
+                source="check_freshness_job",
+                job_id=job_id,
+            )
+
+        await conn.execute(
+            """
+            insert into provenance_events (
+              entity_type,
+              entity_id,
+              event_type,
+              actor_type,
+              actor_id,
+              payload
+            )
+            values ('job', $1::uuid, 'freshness_result_applied', 'machine', $2::uuid, $3::jsonb)
+            """,
+            job_id,
+            actor_module_db_id,
+            json.dumps(
+                {
+                    "posting_id": posting_id,
+                    "recommended_status": recommended_status,
+                    "reason": reason,
+                    "applied": applied,
+                }
+            ),
+        )
+
+    async def _apply_freshness_dead_letter_fallback(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        job_id: str,
+        posting_id: str,
+        actor_module_db_id: str,
+        attempt: int,
+    ) -> None:
+        posting_row = await conn.fetchrow(
+            """
+            select status::text as status
+            from postings
+            where id = $1::uuid
+            for update
+            """,
+            posting_id,
+        )
+        if not posting_row:
+            return
+
+        from_status = str(posting_row["status"])
+        target_status: str | None = None
+        if from_status == "active":
+            target_status = "stale"
+        elif from_status == "stale":
+            target_status = "archived"
+
+        applied = False
+        if target_status:
+            applied = await self._apply_machine_posting_status_transition(
+                conn=conn,
+                posting_id=posting_id,
+                to_status=target_status,
+                actor_module_db_id=actor_module_db_id,
+                reason="freshness_retry_exhausted",
+                source="check_freshness_dead_letter",
+                job_id=job_id,
+            )
+
+        await conn.execute(
+            """
+            insert into provenance_events (
+              entity_type,
+              entity_id,
+              event_type,
+              actor_type,
+              actor_id,
+              payload
+            )
+            values ('job', $1::uuid, 'freshness_retry_exhausted', 'machine', $2::uuid, $3::jsonb)
+            """,
+            job_id,
+            actor_module_db_id,
+            json.dumps(
+                {
+                    "posting_id": posting_id,
+                    "from_status": from_status,
+                    "to_status": target_status,
+                    "attempt": attempt,
+                    "max_attempts": self.job_max_attempts,
+                    "applied": applied,
+                }
+            ),
+        )
+
+    async def _apply_machine_posting_status_transition(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        posting_id: str,
+        to_status: str,
+        actor_module_db_id: str,
+        reason: str,
+        source: str,
+        job_id: str,
+    ) -> bool:
+        posting_row = await conn.fetchrow(
+            """
+            select
+              id::text as id,
+              candidate_id::text as candidate_id,
+              status::text as status
+            from postings
+            where id = $1::uuid
+            for update
+            """,
+            posting_id,
+        )
+        if not posting_row:
+            return False
+
+        from_status = str(posting_row["status"])
+        if to_status == from_status:
+            return False
+        try:
+            self._validate_posting_status_transition(from_status=from_status, to_status=to_status)
+        except RepositoryConflictError:
+            return False
+
+        candidate_id = posting_row["candidate_id"]
+        from_candidate_state: str | None = None
+        to_candidate_state: str | None = None
+
+        if candidate_id:
+            candidate_row = await conn.fetchrow(
+                """
+                select state::text as state
+                from posting_candidates
+                where id = $1::uuid
+                for update
+                """,
+                candidate_id,
+            )
+            if candidate_row:
+                from_candidate_state = str(candidate_row["state"])
+                derived_candidate_state = self._derive_candidate_state_for_posting_status(status=to_status)
+                if derived_candidate_state and derived_candidate_state != from_candidate_state:
+                    try:
+                        self._validate_candidate_transition(
+                            from_state=from_candidate_state,
+                            to_state=derived_candidate_state,
+                        )
+                    except RepositoryConflictError:
+                        return False
+                    await conn.execute(
+                        """
+                        update posting_candidates
+                        set state = $2::candidate_state
+                        where id = $1::uuid
+                        """,
+                        candidate_id,
+                        derived_candidate_state,
+                    )
+                    to_candidate_state = derived_candidate_state
+
+        await conn.execute(
+            """
+            update postings
+            set
+              status = $2::posting_status,
+              published_at = case
+                when $2::posting_status = 'active' then coalesce(published_at, now())
+                else published_at
+              end
+            where id = $1::uuid
+            """,
+            posting_id,
+            to_status,
+        )
+
+        await conn.execute(
+            """
+            insert into provenance_events (
+              entity_type,
+              entity_id,
+              event_type,
+              actor_type,
+              actor_id,
+              payload
+            )
+            values ('posting', $1::uuid, 'status_changed', 'machine', $2::uuid, $3::jsonb)
+            """,
+            posting_id,
+            actor_module_db_id,
+            json.dumps(
+                {
+                    "from_status": from_status,
+                    "to_status": to_status,
+                    "reason": reason,
+                    "source": source,
+                    "job_id": job_id,
+                }
+            ),
+        )
+
+        if candidate_id and to_candidate_state and from_candidate_state:
+            await conn.execute(
+                """
+                insert into provenance_events (
+                  entity_type,
+                  entity_id,
+                  event_type,
+                  actor_type,
+                  actor_id,
+                  payload
+                )
+                values ('posting_candidate', $1::uuid, 'state_changed', 'machine', $2::uuid, $3::jsonb)
+                """,
+                candidate_id,
+                actor_module_db_id,
+                json.dumps(
+                    {
+                        "from_state": from_candidate_state,
+                        "to_state": to_candidate_state,
+                        "reason": reason,
+                        "source": source,
+                        "posting_id": posting_id,
+                        "job_id": job_id,
+                    }
+                ),
+            )
+
+        return True
+
     async def _fetch_candidate_row(self, *, conn: asyncpg.Connection, candidate_id: str) -> asyncpg.Record | None:
         return await conn.fetchrow(
             """
@@ -2188,4 +2548,7 @@ def get_repository() -> PostgresRepository:
         job_max_attempts=settings.job_max_attempts,
         job_retry_base_seconds=settings.job_retry_base_seconds,
         job_retry_max_seconds=settings.job_retry_max_seconds,
+        freshness_check_interval_hours=settings.freshness_check_interval_hours,
+        freshness_stale_after_hours=settings.freshness_stale_after_hours,
+        freshness_archive_after_hours=settings.freshness_archive_after_hours,
     )

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.security import get_machine_principal
-from app.schemas.jobs import ClaimRequest, JobOut, LeaseReapOut, ResultRequest
+from app.schemas.jobs import ClaimRequest, FreshnessEnqueueOut, JobOut, LeaseReapOut, ResultRequest
 from app.services.repository import (
     RepositoryConflictError,
     RepositoryForbiddenError,
@@ -115,3 +115,25 @@ async def reap_expired_jobs(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
     return LeaseReapOut(requeued=requeued)
+
+
+@router.post("/enqueue-freshness", response_model=FreshnessEnqueueOut)
+async def enqueue_freshness_jobs(
+    principal=Depends(get_machine_principal),
+    repository=Depends(get_repository),
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> FreshnessEnqueueOut:
+    try:
+        principal.require_scopes({"jobs:write"})
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    if not principal.actor_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid machine principal")
+
+    try:
+        enqueued = await repository.enqueue_due_freshness_jobs(module_db_id=principal.actor_id, limit=limit)
+    except RepositoryUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    return FreshnessEnqueueOut(enqueued=enqueued)

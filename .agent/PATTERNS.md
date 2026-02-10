@@ -17,6 +17,8 @@
 14. For Supabase-backed human authz, trust elevated roles only from operator-controlled claim sources (e.g., `app_metadata`), not user-editable profile metadata.
 15. Keep moderation state-transition rules and posting lifecycle coupling in one transactional repository path to avoid route-level policy drift.
 16. For multi-entity lifecycle domains, define explicit transition guards per entity and enforce deterministic cross-entity mapping in the same transaction (e.g., posting status to candidate state).
+17. For new durable job kinds, branch behavior in one `submit_job_result` transaction path so retries/dead-letter semantics stay centralized and consistent across workers.
+18. When reading dynamic JSON payloads in typed worker code, normalize to typed locals first (`raw_payload` -> `dict[str, Any]`) before field access to keep mypy stable.
 
 ## Anti-patterns
 1. Hidden side effects without tests or receipts.

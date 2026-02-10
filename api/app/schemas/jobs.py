@@ -24,3 +24,7 @@ class ResultRequest(BaseModel):
 
 class LeaseReapOut(BaseModel):
     requeued: int
+
+
+class FreshnessEnqueueOut(BaseModel):
+    enqueued: int
