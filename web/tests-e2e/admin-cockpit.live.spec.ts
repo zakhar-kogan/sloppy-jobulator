@@ -16,6 +16,10 @@ const ADMIN_HEADERS = {
   Authorization: "Bearer admin-token",
 };
 
+const MODERATOR_HEADERS = {
+  Authorization: "Bearer moderator-token",
+};
+
 type DiscoveryAccepted = {
   discovery_id: string;
   normalized_url: string;
@@ -107,6 +111,29 @@ async function createDiscoveryAndProcess(
   return { discoveryId: discovery.discovery_id, candidateHash: discovery.canonical_hash };
 }
 
+async function listCandidates(
+  request: import("@playwright/test").APIRequestContext,
+  query = "limit=100",
+): Promise<Candidate[]> {
+  const response = await request.get(`${API_BASE_URL}/candidates?${query}`, { headers: ADMIN_HEADERS });
+  if (!response.ok()) {
+    throw new Error(`candidates request failed (${response.status()}): ${await response.text()}`);
+  }
+  return (await response.json()) as Candidate[];
+}
+
+async function findCandidateByDiscovery(
+  request: import("@playwright/test").APIRequestContext,
+  discoveryId: string,
+): Promise<Candidate> {
+  const candidates = await listCandidates(request);
+  const candidate = candidates.find((row) => row.discovery_ids.includes(discoveryId));
+  if (!candidate) {
+    throw new Error(`candidate for discovery ${discoveryId} not found`);
+  }
+  return candidate;
+}
+
 test("cockpit live flow persists merge, moderation, module toggles, and posting override status", async ({
   page,
   request,
@@ -127,18 +154,8 @@ test("cockpit live flow persists merge, moderation, module toggles, and posting 
     false,
   );
 
-  const candidatesResp = await request.get(`${API_BASE_URL}/candidates?limit=100`, { headers: ADMIN_HEADERS });
-  if (!candidatesResp.ok()) {
-    throw new Error(
-      `candidates request failed (${candidatesResp.status()}): ${await candidatesResp.text()}`,
-    );
-  }
-  const candidates = (await candidatesResp.json()) as Candidate[];
-
-  const primaryCandidate = candidates.find((candidate) => candidate.discovery_ids.includes(primary.discoveryId));
-  const secondaryCandidate = candidates.find((candidate) => candidate.discovery_ids.includes(secondary.discoveryId));
-  expect(primaryCandidate).toBeDefined();
-  expect(secondaryCandidate).toBeDefined();
+  const primaryCandidate = await findCandidateByDiscovery(request, primary.discoveryId);
+  const secondaryCandidate = await findCandidateByDiscovery(request, secondary.discoveryId);
   expect(primaryCandidate!.id).not.toEqual(secondaryCandidate!.id);
 
   await page.goto("/admin/cockpit");
@@ -218,4 +235,79 @@ test("cockpit live flow persists merge, moderation, module toggles, and posting 
   const processor = moduleRows.find((row) => row.module_id === "local-processor");
   expect(processor).toBeDefined();
   expect(processor!.enabled).toBe(true);
+});
+
+test("cockpit live merge conflict path surfaces backend detail", async ({ page, request }) => {
+  const suffix = uniqueSuffix();
+  const primary = await createDiscoveryAndProcess(
+    request,
+    `live-conflict-primary-${suffix}`,
+    `live-conflict-primary-${suffix}`,
+    `Live Conflict Primary ${suffix}`,
+    true,
+  );
+  const secondary = await createDiscoveryAndProcess(
+    request,
+    `live-conflict-secondary-${suffix}`,
+    `live-conflict-secondary-${suffix}`,
+    `Live Conflict Secondary ${suffix}`,
+    true,
+  );
+
+  const primaryCandidate = await findCandidateByDiscovery(request, primary.discoveryId);
+  const secondaryCandidate = await findCandidateByDiscovery(request, secondary.discoveryId);
+  expect(primaryCandidate.id).not.toEqual(secondaryCandidate.id);
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+
+  const queueFilters = page.locator("article:has(h2:text-is('Candidate Queue Filters'))");
+  await queueFilters.getByLabel("State").selectOption("needs_review");
+  await queueFilters.getByRole("button", { name: "Refresh Candidates" }).click();
+
+  const candidateTable = page.locator("article:has(h2:text-is('Candidate Queue'))");
+  const primaryRow = candidateTable.locator("tbody tr").filter({ hasText: primaryCandidate.id });
+  await expect(primaryRow).toHaveCount(1);
+  await primaryRow.getByRole("button", { name: /Select|Selected/ }).click();
+
+  const mergeForm = page.locator("article:has(h2:text-is('Selected Candidate Actions')) form").nth(1);
+  await mergeForm.getByLabel("Secondary Candidate ID").fill(secondaryCandidate.id);
+  await mergeForm.getByLabel("Reason").fill("live merge conflict validation");
+  await mergeForm.getByRole("button", { name: "Merge Candidate" }).click();
+
+  await expect(page.getByText("cannot merge candidates that both already have postings")).toBeVisible();
+  await expect(page.getByText(`Candidate merge action completed for ${primaryCandidate.id}.`)).toHaveCount(0);
+});
+
+test("cockpit live backend rejects non-admin and invalid requests", async ({ request }) => {
+  const suffix = uniqueSuffix();
+  const seeded = await createDiscoveryAndProcess(
+    request,
+    `live-negative-${suffix}`,
+    `live-negative-${suffix}`,
+    `Live Negative Candidate ${suffix}`,
+    false,
+  );
+  const seededCandidate = await findCandidateByDiscovery(request, seeded.discoveryId);
+
+  const missingTokenResp = await request.get(`${API_BASE_URL}/candidates?limit=1`);
+  expect(missingTokenResp.status()).toBe(401);
+  const missingTokenPayload = (await missingTokenResp.json()) as { detail?: unknown };
+  expect(missingTokenPayload.detail).toBe("human auth requires bearer token");
+
+  const nonAdminResp = await request.get(`${API_BASE_URL}/admin/modules?limit=1`, {
+    headers: MODERATOR_HEADERS,
+  });
+  expect(nonAdminResp.status()).toBe(403);
+  const nonAdminPayload = (await nonAdminResp.json()) as { detail?: unknown };
+  expect(typeof nonAdminPayload.detail).toBe("string");
+  expect(String(nonAdminPayload.detail)).toContain("admin:write");
+
+  const invalidPayloadResp = await request.patch(`${API_BASE_URL}/candidates/${seededCandidate.id}`, {
+    headers: ADMIN_HEADERS,
+    data: { state: "definitely_invalid" },
+  });
+  expect(invalidPayloadResp.status()).toBe(422);
+  const invalidPayload = (await invalidPayloadResp.json()) as { detail?: unknown };
+  expect(Array.isArray(invalidPayload.detail)).toBeTruthy();
 });

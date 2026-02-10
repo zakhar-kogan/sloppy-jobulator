@@ -14,18 +14,18 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `H2` operator cockpit baseline is live with Next.js `/admin/cockpit` candidate queue actions (`PATCH /candidates`, `POST /candidates/{id}/merge`, `POST /candidates/{id}/override`) and admin module/job flows (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) through server proxy routes, with both mock-backed and live backend-backed Playwright coverage plus CI `web-e2e-live` wiring.
-Next: Broaden `L1` live browser coverage beyond the current cockpit happy path (error/authz variants and additional persistence assertions) and stabilize CI runtime.
+Now: `H2` operator cockpit baseline is live with Next.js `/admin/cockpit` candidate queue actions (`PATCH /candidates`, `POST /candidates/{id}/merge`, `POST /candidates/{id}/override`) and admin module/job flows (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) through server proxy routes, with both mock-backed and live backend-backed Playwright coverage (happy path + negative/authz: merge conflict, 401 missing token, 403 non-admin, 422 invalid payload) plus CI `web-e2e-live` wiring.
+Next: Expand live persistence assertions beyond current candidate/posting/module checks, then harden `web-e2e-live` CI runtime and add admin proxy failure-mapping contract coverage.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
-- 2026-02-10 `[CODE]` Added admin policy-management endpoints (`GET/PUT/PATCH /admin/source-trust-policy`) plus provenance audit writes (`policy_upserted`, `policy_enabled_changed`) with actor attribution and prior/new enabled state payloads.
 - 2026-02-10 `[CODE]` Expanded integration API coverage to assert admin trust-policy CRUD/filter/authz, audit receipts, and invalid-rules contract failures.
 - 2026-02-10 `[CODE]` Added `RUNBOOK` API-first trust-policy operator snippets and Next.js trust-policy UI/proxy routes (`/admin/source-trust-policy`, `/api/admin/source-trust-policy`).
 - 2026-02-10 `[CODE]` Added admin operator cockpit baseline: new admin API module/job endpoints with provenance-backed safe mutations, Next.js `/admin/cockpit` candidate action workflows, and server proxy routes for candidates/modules/jobs operations.
 - 2026-02-10 `[CODE]` Added web-side API-contract tests (`node:test`) for cockpit query encoding and admin proxy route path builders; wired `pnpm --dir web test:contracts`.
 - 2026-02-10 `[CODE]` Added Playwright browser automation (`web/tests-e2e/admin-cockpit.spec.ts`) and config/scripts (`web/playwright.config.ts`, `pnpm --dir web test:e2e`) for mock-backed cockpit merge/patch/override + module/job operator flows.
 - 2026-02-10 `[CODE]` Added live backend Playwright cockpit coverage (`web/tests-e2e/admin-cockpit.live.spec.ts`, `web/playwright.live.config.ts`, `scripts/mock_supabase_auth.py`) and CI job wiring (`web-e2e-live` in `.github/workflows/ci.yml`).
+- 2026-02-10 `[CODE]` Expanded live backend Playwright cockpit coverage with negative/authz assertions: merge conflict error rendering plus backend `401` missing bearer, `403` non-admin, and `422` invalid payload contracts.
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
@@ -50,3 +50,5 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[TOOL]` `fnm exec --using 24.13.0 pnpm --dir web test:contracts -> lint -> typecheck` passed after Playwright additions.
 - 2026-02-10 `[TOOL]` `(escalated) make db-up -> make db-reset -> fnm exec --using 24.13.0 pnpm --dir web test:e2e:live` passed (`1/1`) after fixing API limit bounds (`limit<=100`) and secondary seed merge constraints.
 - 2026-02-10 `[TOOL]` `(escalated) fnm exec --using 24.13.0 pnpm --dir web test:e2e` passed (`2/2`) after isolating live specs via `testIgnore`.
+- 2026-02-10 `[TOOL]` `(escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live` passed (`3/3`) after adding negative/authz live cockpit scenarios.
+- 2026-02-10 `[TOOL]` `fnm exec --using 24.13.0 pnpm --dir web typecheck -> bash scripts/agent-hygiene-check.sh --mode project` passed after live-spec expansion.

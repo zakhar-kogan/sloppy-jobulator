@@ -48,6 +48,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Add runbook API-first operator guidance for trust-policy management and audit verification (`curl` + SQL receipts).
 - [x] Wire admin UI (`H2`) trust-policy management flows to `GET/PUT/PATCH /admin/source-trust-policy` via Next.js proxy routes.
 - [x] Expand `H2` with operator cockpit baseline (`/admin/cockpit`) for candidate queue actions (`approve/reject/merge/override`) plus module/job visibility and bounded maintenance mutations via new admin API surfaces.
+- [x] Expand `L1` live cockpit Playwright coverage with negative/authz scenarios (`409` merge conflict surfaced in UI, backend `401` missing bearer, `403` non-admin, `422` invalid payload).
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
@@ -78,6 +79,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-10: Added `web/app/admin/source-trust-policy` UI and Next.js server proxy routes (`web/app/api/admin/source-trust-policy/**`) so operators can list/upsert/toggle policies against the admin API surface.
 - 2026-02-10: Added admin module/job API endpoints (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) plus `/admin/cockpit` UI and proxy routes for candidate queue actions and operator maintenance flows.
 - 2026-02-10: Added web-side API-contract tests (`node:test`) for cockpit query serialization and proxy-path builders, wired as `pnpm --dir web test:contracts`.
+- 2026-02-10: Added live cockpit negative/authz coverage in Playwright (`web/tests-e2e/admin-cockpit.live.spec.ts`) for merge-conflict error rendering and backend `401/403/422` contracts.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -110,4 +112,5 @@ Bootstrap this repository into a real project implementation using the handoff s
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
 1. Keep full moderation/admin E2E coverage under `L1` as the primary remaining validation gap.
-2. Expand the new live backend cockpit Playwright coverage into additional negative/authz scenarios and keep `web-e2e-live` CI runtime stable.
+2. Expand live persistence assertions for cockpit actions beyond current candidate/posting/module checks.
+3. Harden `web-e2e-live` CI runtime (cache + bounded retries + timeout budgets) and add admin proxy failure-mapping contract tests.
