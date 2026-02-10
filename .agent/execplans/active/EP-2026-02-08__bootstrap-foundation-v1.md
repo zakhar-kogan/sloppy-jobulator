@@ -41,6 +41,8 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Start `A3/F2` baseline: role bootstrap SQL automation + trust-policy-based publish routing with integration coverage.
 - [x] Implement `E3` dedupe scorer v1 and wire deterministic merge confidence/risk outputs into `E4` merge policy routing with auto-merge/review decision recording.
 - [x] Expand `F2` merge-aware trust-policy routing with source-configurable merge actions/reasons/moderation routes and DB-backed integration coverage.
+- [x] Add strict repository validation + write-path enforcement for trust-policy merge-routing `rules_json` keys (allowed actions, route-label format, unknown-key rejection).
+- [x] Expand `F2` integration regressions with mixed trust + conflicting dedupe signals and invalid policy-write validation cases.
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
@@ -64,6 +66,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-10: Extended `F2` trust-policy handling to consume final merge decisions (`needs_review`, `rejected`, `auto_merged`) with `rules_json` overrides (`merge_decision_actions`, `merge_decision_reasons`, `moderation_routes`) and source-specific integration tests.
 - 2026-02-10: Added forced auto-merge-conflict integration coverage to validate `auto_merge_blocked` fallback routing still honors source policy overrides and moderation-route receipts.
 - 2026-02-10: Documented operator SQL runbook examples for `rules_json` merge-routing patterns, including `auto_merge_blocked` fallback/reason/route verification queries.
+- 2026-02-10: Added strict `source_trust_policy` write validation in repository (`upsert_source_trust_policy`) and moved integration upserts through this path, then added mixed-trust/conflicting-signal and invalid-rules regression tests.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -95,5 +98,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Build operator-facing policy management/validation surfaces for merge-routing keys and reserved route labels.
-2. Extend mixed trust + dedupe edge coverage beyond current fallback-focused cases.
+1. Implement admin policy-management endpoints that call `upsert_source_trust_policy` and expose validation failures as API contract responses.

@@ -14,18 +14,17 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `F2` trust-policy routing supports merge-aware overrides and runbook now includes concrete `rules_json` fallback patterns for `auto_merge_blocked` handling.
-Next: Build operator-facing policy management/validation for merge-routing keys and broaden mixed trust/dedupe edge coverage.
+Now: `F2` repository trust-policy writes now enforce strict `rules_json` merge-routing validation (allowed actions, route-label format, unknown-key rejection), and integration coverage includes mixed trust + conflicting dedupe scenarios.
+Next: Add admin policy-management endpoints that call the validated repository write path and add API-level contract tests for validation failures/success paths.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
-- 2026-02-10 `[CODE]` Added `dedupe.py` scorer v1 with deterministic precision-first confidence over strong signals (hash/URL), medium text similarity, and NER/contact-domain tie-breakers.
-- 2026-02-10 `[CODE]` Wired scorer into extract projection so candidate risk flags/confidence now drive machine merge-policy outcomes (`auto_merged`, `needs_review`, `rejected`).
-- 2026-02-10 `[CODE]` Added shared merge execution helper so manual moderator merges and machine auto-merges share consistent `candidate_merge_decisions` + provenance behavior.
-- 2026-02-10 `[CODE]` Added auto-merge short-circuit to keep canonical posting ownership stable while archiving secondary candidates and retaining discovery/evidence links on the primary.
-- 2026-02-10 `[CODE]` Added review-routing override so uncertain/conflicting dedupe outcomes force moderation queue state even when trust-policy would otherwise auto-publish.
-- 2026-02-10 `[CODE]` Expanded `source_trust_policy` merge routing to apply policy-configurable `merge_decision_actions`/`merge_decision_reasons`/`moderation_routes`, default `rejected` handling, and runbook fallback examples.
-- 2026-02-10 `[CODE]` Added DB-backed integration coverage for source-specific overrides on dedupe `needs_review`/`rejected` outcomes, including forced `auto_merge_blocked` fallback routing.
+- 2026-02-10 `[CODE]` Added strict repository validation for `source_trust_policy.rules_json` merge-routing contracts (top-level key whitelist, decision-map unknown-key rejection, action whitelist, route-label format checks).
+- 2026-02-10 `[CODE]` Added repository write API `upsert_source_trust_policy(...)` and enforced strict validation before DB persistence.
+- 2026-02-10 `[CODE]` Switched integration test policy upsert helper to use repository write path so trust-policy writes now run through validation logic.
+- 2026-02-10 `[CODE]` Expanded integration regression coverage with mixed-trust dedupe cases: semi-trusted conflicting hash routing to review and untrusted rejected merge routing behavior.
+- 2026-02-10 `[CODE]` Added integration negative tests for invalid trust-policy writes (`unknown decision key`, invalid merge action, invalid moderation route label).
+- 2026-02-10 `[CODE]` Updated roadmap `F2` status and next steps to document strict merge-routing validation and explicit pending admin policy API contract targets.
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
@@ -36,23 +35,7 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-08 `[CODE]` D-001 through D-004 active in `.agent/DECISIONS.md`.
 
 ## Receipts
-- 2026-02-09 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -> make db-down` passed (`17/17`, includes trust-policy routing coverage).
-- 2026-02-09 `[TOOL]` `uv run --project api --extra dev pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py` passed (`13/13`, includes bootstrap-script tests).
-- 2026-02-09 `[TOOL]` `gh run list --branch main --limit 6` confirms post-merge `main` checks passed (`CI` run `21835425786`, `Agent Hygiene` run `21835425797`).
-- 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "posting_lifecycle_patch or moderation_candidate_state_transitions_update_posting_status" -> make db-down` passed (`3/3` selected).
-- 2026-02-10 `[TOOL]` `uv run --project api --extra dev pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py` passed (`15/15`, includes posting patch authz tests).
-- 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/app api/tests && uv run --project api --extra dev mypy api/app` passed.
-- 2026-02-10 `[TOOL]` `uv run --project workers --extra dev pytest workers/tests -q` passed (`6/6`, includes freshness evaluator coverage).
-- 2026-02-10 `[TOOL]` `UV_CACHE_DIR=/tmp/uv-cache uv run --project api --extra dev ruff check ...` and `UV_CACHE_DIR=/tmp/uv-cache uv run --project workers --extra dev ruff check ...` passed for changed freshness files.
-- 2026-02-10 `[TOOL]` `UV_CACHE_DIR=/tmp/uv-cache uv run --project api --extra dev mypy api/app` and `UV_CACHE_DIR=/tmp/uv-cache uv run --project workers --extra dev mypy workers/app` passed.
-- 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "enqueue_freshness_jobs or freshness_dead_letter" -> make db-down` passed (`2/2` selected).
-- 2026-02-10 `[TOOL]` `uv run --project api --extra dev pytest api/tests/test_dedupe_scorer.py -q` passed (`4/4`).
-- 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/app/services/repository.py api/app/services/dedupe.py api/tests/test_dedupe_scorer.py api/tests/test_discovery_jobs_integration.py` and `uv run --project api --extra dev mypy api/app` passed.
-- 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "dedupe_policy_auto_merges_high_confidence_duplicate_candidate or dedupe_policy_routes_uncertain_match_to_review_queue" -> make db-down` passed (`2/2` selected).
+- 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/app/services/repository.py api/tests/test_discovery_jobs_integration.py` passed.
+- 2026-02-10 `[TOOL]` `uv run --project api --extra dev mypy api/app/services/repository.py` passed.
+- 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> (escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "mixed_trust or write_rejects_unknown_merge_routing_key or write_rejects_invalid_merge_action or write_rejects_invalid_route_label or trust_policy_can_override_needs_review_merge_route_for_source or trust_policy_can_override_rejected_merge_route_for_source or trust_policy_override_applies_when_auto_merge_fallbacks_to_needs_review" -> make db-down` passed (`8/8` selected).
 - 2026-02-10 `[TOOL]` `bash scripts/agent-hygiene-check.sh --mode project` passed.
-- 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/app/services/repository.py api/tests/test_discovery_jobs_integration.py` and `uv run --project api --extra dev mypy api/app/services/repository.py` passed.
-- 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> (escalated) SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "override_needs_review_merge_route_for_source or override_rejected_merge_route_for_source" -> (escalated) ... -k "dedupe_policy or trust_policy" -> make db-down` passed (`2/2` selected, then `8/8` selected).
-- 2026-02-10 `[TOOL]` `make lint` and `make typecheck` failed on host (`ruff`/`mypy` missing in PATH); equivalent `uv run --project api --extra dev` checks passed for touched API files.
-- 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/tests/test_discovery_jobs_integration.py` passed after fallback test addition.
-- 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> (escalated) SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "auto_merge_fallbacks_to_needs_review" -> (escalated) ... -k "dedupe_policy or trust_policy or auto_merge_fallbacks_to_needs_review" -> make db-down` passed (`1/1` selected, then `9/9` selected).
-- 2026-02-10 `[CODE]` Added `RUNBOOK` SQL examples for merge-routing policy patterns, including `auto_merge_blocked` fallback handling and provenance verification query.

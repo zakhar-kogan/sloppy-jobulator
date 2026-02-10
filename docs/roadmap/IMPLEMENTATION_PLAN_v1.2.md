@@ -33,7 +33,7 @@
 | E3 | done | Dedupe scorer v1 now computes deterministic merge confidence from strong/medium/tie-break signals (URL/hash, text similarity, NER/contact-domain overlap). |
 | E4 | done | Merge policy routing now records machine decisions (`auto_merged`/`needs_review`/`rejected`), auto-applies high-confidence merges, and routes uncertain/conflicting matches to moderation with provenance. |
 | F1 | done | Moderation APIs now cover approve/reject (state patch), merge, and override flows with role checks + audit events. |
-| F2 | in_progress | `source_trust_policy` routing now drives trusted/semi/untrusted publication paths and merge-outcome actions (`needs_review`/`rejected`/`auto_merged`) with source-specific moderation-route receipts; broader policy automation remains pending. |
+| F2 | in_progress | `source_trust_policy` routing now drives trusted/semi/untrusted publication paths and merge-outcome actions (`needs_review`/`rejected`/`auto_merged`) with source-specific moderation-route receipts; repository write-path validation now strictly enforces allowed merge actions, route-label format, and unknown-key rejection for merge-routing maps, while admin policy endpoints are still pending. |
 | F3 | done | Posting lifecycle transitions are now explicit via moderated `PATCH /postings/{id}` with transition guards, candidate synchronization, provenance writes, and DB-backed integration coverage. |
 | G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
 | G2 | done | Freshness scheduler endpoint + worker cadence now enqueue `check_freshness` jobs; result/dead-letter paths apply deterministic posting downgrade/archive transitions with provenance and integration coverage. |
@@ -56,8 +56,8 @@
 ## Next Implementation Steps (Priority Order)
 
 1. Continue `F2` trust-policy automation hardening around operator ergonomics and policy management surfaces.
-- Add operator-facing policy management surfaces/validation for `rules_json` merge routing keys (`merge_decision_actions`, `merge_decision_reasons`, `moderation_routes`).
-- Extend integration coverage for additional mixed trust + dedupe edge cases beyond current fallback coverage.
+- Deliver admin policy-management API contracts that call repository-validated writes (target surface: `GET /admin/source-trust-policy`, `PUT /admin/source-trust-policy/{source_key}`, `PATCH /admin/source-trust-policy/{source_key}` for enable/disable).
+- Add contract tests for admin trust-policy writes that assert strict `rules_json` merge-routing validation responses (invalid action, invalid route label, unknown map keys).
 
 ## Workstreams and Task Graph
 
@@ -80,7 +80,7 @@
 | 15 | E3 | Dedupe scorer v1 (URL/hash + text sim + NER tie-break) | P0 | L | C3, D3, E1 | Precision-first thresholds + confidence output. |
 | 16 | E4 | Merge decision flow (auto vs review queue) | P0 | M | E3, C3 | Write `candidate_merge_decisions` + provenance. |
 | 17 | F1 | Moderation APIs (approve/reject/merge/override) | P0 | M | B3, E4, A2 | Staff-only operations. |
-| 18 | F2 | Trust-policy publisher (trusted/semi/untrusted logic) | P0 | M | F1, E4 | Policy engine for auto-publish routing. |
+| 18 | F2 | Trust-policy publisher (trusted/semi/untrusted logic) | P0 | M | F1, E4 | Policy engine for auto-publish routing; repository write path now validates merge-routing `rules_json` contract, admin endpoints remain pending. |
 | 19 | F3 | Posting projection + status lifecycle | P0 | M | F2 | `active/stale/archived/closed` handling. |
 | 20 | G1 | Public read APIs (`GET /postings`, detail, filters) | P0 | M | F3 | Search/filter/sort/pagination. |
 | 21 | G2 | Daily freshness checker jobs + archive transitions | P0 | M | D3, F3 | 24h cadence + retries before downgrade. |

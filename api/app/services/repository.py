@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -39,6 +40,10 @@ class RepositoryForbiddenError(RepositoryError):
     """Raised when an operation is not permitted for the actor."""
 
 
+class RepositoryValidationError(RepositoryError):
+    """Raised when payload validation fails before persistence."""
+
+
 @dataclass(slots=True)
 class MachineCredentialRecord:
     module_db_id: str
@@ -55,6 +60,23 @@ class SourceTrustPolicyRecord:
     requires_moderation: bool
     rules_json: dict[str, Any]
     matched_fallback: bool
+
+
+SOURCE_POLICY_TRUST_LEVELS = {"trusted", "semi_trusted", "untrusted"}
+SOURCE_POLICY_RULE_KEYS = {
+    "min_confidence",
+    "require_human_review",
+    "allow_if_no_conflicts",
+    "merge_decision_actions",
+    "merge_decision_reasons",
+    "moderation_routes",
+    "default_moderation_route",
+}
+SOURCE_POLICY_ACTION_MAP_KEYS = {"needs_review", "rejected"}
+SOURCE_POLICY_REASON_MAP_KEYS = {"needs_review", "rejected", "auto_merged"}
+SOURCE_POLICY_ROUTE_MAP_KEYS = {"needs_review", "rejected"}
+SOURCE_POLICY_ALLOWED_ACTIONS = {"needs_review", "reject", "archive", "preserve"}
+SOURCE_POLICY_ROUTE_LABEL_RE = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
 
 
 class PostgresRepository:
@@ -114,6 +136,72 @@ class PostgresRepository:
             )
             for row in rows
         ]
+
+    async def upsert_source_trust_policy(
+        self,
+        *,
+        source_key: str,
+        trust_level: str,
+        auto_publish: bool,
+        requires_moderation: bool,
+        rules_json: dict[str, Any],
+        enabled: bool = True,
+    ) -> SourceTrustPolicyRecord:
+        normalized_source_key = self._coerce_text(source_key)
+        if not normalized_source_key:
+            raise RepositoryValidationError("source_key must be a non-empty string")
+
+        normalized_trust_level = self._coerce_text(trust_level)
+        if normalized_trust_level not in SOURCE_POLICY_TRUST_LEVELS:
+            raise RepositoryValidationError(
+                "trust_level must be one of: trusted, semi_trusted, untrusted",
+            )
+
+        normalized_rules_json = self._validate_source_trust_policy_rules_json(rules_json, strict=True)
+        pool = await self._get_pool()
+        row = await pool.fetchrow(
+            """
+            insert into source_trust_policy (
+              source_key,
+              trust_level,
+              auto_publish,
+              requires_moderation,
+              rules_json,
+              enabled
+            )
+            values ($1, $2::module_trust_level, $3, $4, $5::jsonb, $6)
+            on conflict (source_key)
+            do update set
+              trust_level = excluded.trust_level,
+              auto_publish = excluded.auto_publish,
+              requires_moderation = excluded.requires_moderation,
+              rules_json = excluded.rules_json,
+              enabled = excluded.enabled
+            returning
+              source_key,
+              trust_level::text as trust_level,
+              auto_publish,
+              requires_moderation,
+              rules_json
+            """,
+            normalized_source_key,
+            normalized_trust_level,
+            bool(auto_publish),
+            bool(requires_moderation),
+            json.dumps(normalized_rules_json),
+            bool(enabled),
+        )
+        if not row:
+            raise RepositoryConflictError("failed to upsert source trust policy")
+
+        return SourceTrustPolicyRecord(
+            source_key=row["source_key"],
+            trust_level=row["trust_level"],
+            auto_publish=bool(row["auto_publish"]),
+            requires_moderation=bool(row["requires_moderation"]),
+            rules_json=self._validate_source_trust_policy_rules_json(row["rules_json"], strict=False),
+            matched_fallback=False,
+        )
 
     async def create_discovery_and_enqueue_extract(
         self,
@@ -2553,6 +2641,158 @@ class PostgresRepository:
             return value
         return {}
 
+    def _validate_source_trust_policy_rules_json(self, rules_json: Any, *, strict: bool) -> dict[str, Any]:
+        raw_rules = self._coerce_json_dict(rules_json)
+        if strict and not isinstance(rules_json, dict):
+            raise RepositoryValidationError("rules_json must be a JSON object")
+        if not raw_rules:
+            return {}
+
+        unknown_top_level = sorted(set(raw_rules) - SOURCE_POLICY_RULE_KEYS)
+        if unknown_top_level:
+            if strict:
+                unknown = ", ".join(unknown_top_level)
+                raise RepositoryValidationError(f"rules_json contains unsupported keys: {unknown}")
+            raw_rules = {key: value for key, value in raw_rules.items() if key in SOURCE_POLICY_RULE_KEYS}
+
+        normalized_rules: dict[str, Any] = {}
+        for key, value in raw_rules.items():
+            if key == "merge_decision_actions":
+                normalized_actions = self._validate_merge_decision_action_map(value, strict=strict)
+                if normalized_actions:
+                    normalized_rules[key] = normalized_actions
+                continue
+            if key == "merge_decision_reasons":
+                normalized_reasons = self._validate_merge_decision_reason_map(value, strict=strict)
+                if normalized_reasons:
+                    normalized_rules[key] = normalized_reasons
+                continue
+            if key == "moderation_routes":
+                normalized_routes = self._validate_merge_decision_route_map(value, strict=strict)
+                if normalized_routes:
+                    normalized_rules[key] = normalized_routes
+                continue
+            if key == "default_moderation_route":
+                default_route = self._validate_moderation_route_label(
+                    value,
+                    field_path="default_moderation_route",
+                    strict=strict,
+                )
+                if default_route:
+                    normalized_rules[key] = default_route
+                continue
+            normalized_rules[key] = value
+
+        return normalized_rules
+
+    def _validate_merge_decision_action_map(self, value: Any, *, strict: bool) -> dict[str, str]:
+        if not isinstance(value, dict):
+            if strict:
+                raise RepositoryValidationError("merge_decision_actions must be an object")
+            return {}
+
+        unknown_keys = sorted(set(value) - SOURCE_POLICY_ACTION_MAP_KEYS)
+        if unknown_keys:
+            if strict:
+                unknown = ", ".join(unknown_keys)
+                raise RepositoryValidationError(f"merge_decision_actions contains unsupported keys: {unknown}")
+            value = {key: action for key, action in value.items() if key in SOURCE_POLICY_ACTION_MAP_KEYS}
+
+        normalized_actions: dict[str, str] = {}
+        for decision, raw_action in value.items():
+            if not isinstance(raw_action, str):
+                if strict:
+                    raise RepositoryValidationError(
+                        f"merge_decision_actions.{decision} must be a string",
+                    )
+                continue
+            normalized_action = raw_action.strip().lower()
+            if normalized_action not in SOURCE_POLICY_ALLOWED_ACTIONS:
+                if strict:
+                    allowed = ", ".join(sorted(SOURCE_POLICY_ALLOWED_ACTIONS))
+                    raise RepositoryValidationError(
+                        f"merge_decision_actions.{decision} must be one of: {allowed}",
+                    )
+                continue
+            normalized_actions[decision] = normalized_action
+        return normalized_actions
+
+    def _validate_merge_decision_reason_map(self, value: Any, *, strict: bool) -> dict[str, str]:
+        if not isinstance(value, dict):
+            if strict:
+                raise RepositoryValidationError("merge_decision_reasons must be an object")
+            return {}
+
+        unknown_keys = sorted(set(value) - SOURCE_POLICY_REASON_MAP_KEYS)
+        if unknown_keys:
+            if strict:
+                unknown = ", ".join(unknown_keys)
+                raise RepositoryValidationError(f"merge_decision_reasons contains unsupported keys: {unknown}")
+            value = {key: reason for key, reason in value.items() if key in SOURCE_POLICY_REASON_MAP_KEYS}
+
+        normalized_reasons: dict[str, str] = {}
+        for decision, raw_reason in value.items():
+            if not isinstance(raw_reason, str):
+                if strict:
+                    raise RepositoryValidationError(
+                        f"merge_decision_reasons.{decision} must be a string",
+                    )
+                continue
+            normalized_reason = raw_reason.strip()
+            if not normalized_reason:
+                if strict:
+                    raise RepositoryValidationError(
+                        f"merge_decision_reasons.{decision} must be a non-empty string",
+                    )
+                continue
+            normalized_reasons[decision] = normalized_reason
+        return normalized_reasons
+
+    def _validate_merge_decision_route_map(self, value: Any, *, strict: bool) -> dict[str, str]:
+        if not isinstance(value, dict):
+            if strict:
+                raise RepositoryValidationError("moderation_routes must be an object")
+            return {}
+
+        unknown_keys = sorted(set(value) - SOURCE_POLICY_ROUTE_MAP_KEYS)
+        if unknown_keys:
+            if strict:
+                unknown = ", ".join(unknown_keys)
+                raise RepositoryValidationError(f"moderation_routes contains unsupported keys: {unknown}")
+            value = {key: route for key, route in value.items() if key in SOURCE_POLICY_ROUTE_MAP_KEYS}
+
+        normalized_routes: dict[str, str] = {}
+        for decision, raw_route in value.items():
+            route = self._validate_moderation_route_label(
+                raw_route,
+                field_path=f"moderation_routes.{decision}",
+                strict=strict,
+            )
+            if route:
+                normalized_routes[decision] = route
+        return normalized_routes
+
+    @staticmethod
+    def _validate_moderation_route_label(value: Any, *, field_path: str, strict: bool) -> str | None:
+        if not isinstance(value, str):
+            if strict:
+                raise RepositoryValidationError(f"{field_path} must be a string")
+            return None
+
+        normalized_route = value.strip()
+        if not normalized_route:
+            if strict:
+                raise RepositoryValidationError(f"{field_path} must be a non-empty string")
+            return None
+
+        if not SOURCE_POLICY_ROUTE_LABEL_RE.match(normalized_route):
+            if strict:
+                raise RepositoryValidationError(
+                    f"{field_path} must match format `domain.route_label` with lowercase letters, digits, . _ or -",
+                )
+            return None
+        return normalized_route
+
     @staticmethod
     def _has_projection_signal(*, extraction: dict[str, Any], projection_payload: dict[str, Any]) -> bool:
         if "posting" in extraction and isinstance(extraction["posting"], dict):
@@ -2779,20 +3019,12 @@ class PostgresRepository:
             policy_lookup_order,
         )
         if row:
-            rules_json = row["rules_json"]
-            if isinstance(rules_json, str):
-                try:
-                    rules_json = json.loads(rules_json)
-                except json.JSONDecodeError:
-                    rules_json = {}
-            if not isinstance(rules_json, dict):
-                rules_json = {}
             return SourceTrustPolicyRecord(
                 source_key=row["source_key"],
                 trust_level=row["trust_level"],
                 auto_publish=bool(row["auto_publish"]),
                 requires_moderation=bool(row["requires_moderation"]),
-                rules_json=rules_json,
+                rules_json=self._validate_source_trust_policy_rules_json(row["rules_json"], strict=False),
                 matched_fallback=False,
             )
 

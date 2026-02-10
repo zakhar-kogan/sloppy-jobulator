@@ -14,7 +14,12 @@ from fastapi.testclient import TestClient
 import app.core.security as security
 from app.core.config import get_settings
 from app.main import app
-from app.services.repository import PostgresRepository, RepositoryConflictError, get_repository
+from app.services.repository import (
+    PostgresRepository,
+    RepositoryConflictError,
+    RepositoryValidationError,
+    get_repository,
+)
 
 CONNECTOR_HEADERS = {
     "X-Module-Id": "local-connector",
@@ -1609,6 +1614,188 @@ def test_trust_policy_uses_source_key_override(
     assert applied_source_key == "tests:force-review"
 
 
+def test_trust_policy_mixed_trust_conflicting_hash_signal_routes_to_review(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    _run(_ensure_connector_module(database_url, module_id="semi-trusted-conflict-connector", trust_level="semi_trusted"))
+    semi_trusted_headers = {
+        "X-Module-Id": "semi-trusted-conflict-connector",
+        "X-API-Key": "local-connector-key",
+    }
+
+    primary_candidate_id, _ = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-mixed-trust-conflict-shared",
+        canonical_hash="mixed-trust-conflict-primary-hash",
+    )
+    secondary_candidate_id, secondary_posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        connector_headers=semi_trusted_headers,
+        external_id="ext-mixed-trust-conflict-shared",
+        canonical_hash="mixed-trust-conflict-secondary-hash",
+    )
+
+    merge_decision = _run(
+        _fetchval(
+            database_url,
+            """
+            select decision::text
+            from candidate_merge_decisions
+            where primary_candidate_id = $1::uuid
+              and secondary_candidate_id = $2::uuid
+            order by created_at desc
+            limit 1
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+        )
+    )
+    secondary_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            secondary_candidate_id,
+        )
+    )
+    posting_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            secondary_posting_id,
+        )
+    )
+    risk_flags = _run(
+        _fetchval(
+            database_url,
+            "select risk_flags from posting_candidates where id = $1::uuid",
+            secondary_candidate_id,
+        )
+    )
+    applied_trust_level = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'trust_level'
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'trust_policy_applied'
+            order by id desc
+            limit 1
+            """,
+            secondary_candidate_id,
+        )
+    )
+
+    assert merge_decision == "needs_review"
+    assert secondary_state == "needs_review"
+    assert posting_status == "archived"
+    assert "conflict_hash_mismatch" in list(risk_flags or [])
+    assert applied_trust_level == "semi_trusted"
+
+
+def test_trust_policy_mixed_trust_rejected_dedupe_signal_for_untrusted_source(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    _run(_ensure_connector_module(database_url, module_id="untrusted-rejected-connector", trust_level="untrusted"))
+    untrusted_headers = {
+        "X-Module-Id": "untrusted-rejected-connector",
+        "X-API-Key": "local-connector-key",
+    }
+
+    primary_candidate_id, _ = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-mixed-trust-rejected-primary",
+        canonical_hash="mixed-trust-rejected-primary-hash",
+        title="Research Scientist Fellowship",
+        organization_name="Example University Research Lab",
+        tags=["science"],
+        application_url="https://example.edu/apply/shared-form",
+    )
+    secondary_candidate_id, secondary_posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        connector_headers=untrusted_headers,
+        external_id="ext-mixed-trust-rejected-secondary",
+        canonical_hash="mixed-trust-rejected-secondary-hash",
+        title="Research Engineer Fellowship",
+        organization_name="Example University Research Lab",
+        tags=["engineering"],
+        application_url="https://example.edu/apply/shared-form",
+    )
+
+    merge_decision = _run(
+        _fetchval(
+            database_url,
+            """
+            select decision::text
+            from candidate_merge_decisions
+            where primary_candidate_id = $1::uuid
+              and secondary_candidate_id = $2::uuid
+            order by created_at desc
+            limit 1
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+        )
+    )
+    secondary_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            secondary_candidate_id,
+        )
+    )
+    posting_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            secondary_posting_id,
+        )
+    )
+    trust_policy_reason = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'reason'
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'trust_policy_applied'
+            order by id desc
+            limit 1
+            """,
+            secondary_candidate_id,
+        )
+    )
+    applied_trust_level = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'trust_level'
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'trust_policy_applied'
+            order by id desc
+            limit 1
+            """,
+            secondary_candidate_id,
+        )
+    )
+
+    assert merge_decision == "rejected"
+    assert secondary_state == "rejected"
+    assert posting_status == "archived"
+    assert trust_policy_reason == "dedupe_rejected"
+    assert applied_trust_level == "untrusted"
+
+
 def test_trust_policy_can_override_needs_review_merge_route_for_source(
     api_client: TestClient,
     database_url: str,
@@ -1942,6 +2129,54 @@ def test_trust_policy_override_applies_when_auto_merge_fallbacks_to_needs_review
     assert moderation_route == "dedupe.auto_merge_conflict_queue"
 
 
+def test_trust_policy_write_rejects_unknown_merge_routing_key(database_url: str) -> None:
+    with pytest.raises(RepositoryValidationError, match="unsupported keys: unknown_decision"):
+        _run(
+            _upsert_source_trust_policy(
+                database_url,
+                source_key="tests:invalid-policy-unknown-key",
+                trust_level="trusted",
+                auto_publish=True,
+                requires_moderation=False,
+                rules_json={
+                    "merge_decision_actions": {"unknown_decision": "reject"},
+                },
+            )
+        )
+
+
+def test_trust_policy_write_rejects_invalid_merge_action(database_url: str) -> None:
+    with pytest.raises(RepositoryValidationError, match="merge_decision_actions.needs_review"):
+        _run(
+            _upsert_source_trust_policy(
+                database_url,
+                source_key="tests:invalid-policy-action",
+                trust_level="trusted",
+                auto_publish=True,
+                requires_moderation=False,
+                rules_json={
+                    "merge_decision_actions": {"needs_review": "publish_now"},
+                },
+            )
+        )
+
+
+def test_trust_policy_write_rejects_invalid_route_label(database_url: str) -> None:
+    with pytest.raises(RepositoryValidationError, match="moderation_routes.needs_review"):
+        _run(
+            _upsert_source_trust_policy(
+                database_url,
+                source_key="tests:invalid-policy-route",
+                trust_level="trusted",
+                auto_publish=True,
+                requires_moderation=False,
+                rules_json={
+                    "moderation_routes": {"needs_review": "Dedupe Manual Queue"},
+                },
+            )
+        )
+
+
 def _configure_mock_human_auth(monkeypatch: pytest.MonkeyPatch, *, role: str, user_id: str) -> None:
     monkeypatch.setenv("SJ_SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SJ_SUPABASE_ANON_KEY", "anon-key")
@@ -2186,35 +2421,28 @@ async def _upsert_source_trust_policy(
     requires_moderation: bool,
     rules_json: dict[str, Any],
 ) -> None:
-    conn = await asyncpg.connect(database_url)
+    settings = get_settings()
+    repository = PostgresRepository(
+        database_url=database_url,
+        min_pool_size=settings.database_pool_min_size,
+        max_pool_size=settings.database_pool_max_size,
+        job_max_attempts=settings.job_max_attempts,
+        job_retry_base_seconds=settings.job_retry_base_seconds,
+        job_retry_max_seconds=settings.job_retry_max_seconds,
+        freshness_check_interval_hours=settings.freshness_check_interval_hours,
+        freshness_stale_after_hours=settings.freshness_stale_after_hours,
+        freshness_archive_after_hours=settings.freshness_archive_after_hours,
+    )
     try:
-        await conn.execute(
-            """
-            insert into source_trust_policy (
-              source_key,
-              trust_level,
-              auto_publish,
-              requires_moderation,
-              rules_json,
-              enabled
-            )
-            values ($1, $2::module_trust_level, $3, $4, $5::jsonb, true)
-            on conflict (source_key)
-            do update set
-              trust_level = excluded.trust_level,
-              auto_publish = excluded.auto_publish,
-              requires_moderation = excluded.requires_moderation,
-              rules_json = excluded.rules_json,
-              enabled = true
-            """,
-            source_key,
-            trust_level,
-            auto_publish,
-            requires_moderation,
-            json.dumps(rules_json),
+        await repository.upsert_source_trust_policy(
+            source_key=source_key,
+            trust_level=trust_level,
+            auto_publish=auto_publish,
+            requires_moderation=requires_moderation,
+            rules_json=rules_json,
         )
     finally:
-        await conn.close()
+        await repository.close()
 
 
 async def _fetchval(database_url: str, query: str, *args: Any) -> Any:
