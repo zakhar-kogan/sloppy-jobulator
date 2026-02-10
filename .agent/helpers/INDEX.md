@@ -12,7 +12,7 @@ Machine-facing helper memory for recurring failures and repeatable workflows.
 - `H-YYYY-MM-DD__slug` — `Status:<ACTIVE|STABLE|RETIRED>` — `Path:<repo-relative path>` — `Scope:<where it applies>` — `Summary:<one line>`
 
 ## Active Helpers
-- (none in template mode)
+- `H-2026-02-10__db-integration-escalation` — `Status:ACTIVE` — `Path:.agent/helpers/H-2026-02-10__db-integration-escalation.md` — `Scope:Local DB-backed pytest runs from sandboxed Codex sessions` — `Summary:Use /tmp uv cache + escalation fallback when sandbox blocks localhost Postgres access.`
 
 ## Stable Helpers
 - (none yet)

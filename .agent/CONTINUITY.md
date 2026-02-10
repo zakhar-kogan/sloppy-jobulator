@@ -14,18 +14,18 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `G2` baseline landed with scheduled freshness enqueue (`/jobs/enqueue-freshness`), worker `check_freshness` execution, and automated dead-letter downgrade/archive transitions plus provenance coverage.
-Next: Implement `E3` dedupe scorer v1 and connect confidence/risk outputs to `E4` merge policy routing.
+Now: `E3+E4` baseline landed with deterministic dedupe scoring, machine merge-policy decisions, auto-merge for high-confidence matches, and review-queue routing for uncertain/conflicting candidates.
+Next: Expand `F2` trust-policy automation to consume richer merge-policy outcomes and source-specific moderation routing rules.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
-- 2026-02-10 `[CODE]` Added `POST /jobs/enqueue-freshness` with DB-backed due-posting scheduler and duplicate suppression for pending freshness jobs.
-- 2026-02-10 `[CODE]` Added `check_freshness` result/dead-letter handling in repository to apply deterministic machine-driven posting transitions (`active->stale`, `stale->archived`) with candidate-state sync + provenance events.
-- 2026-02-10 `[CODE]` Added worker freshness automation loop (`enqueue_freshness_jobs`) and `check_freshness` evaluator dispatch with configurable stale/archive thresholds.
-- 2026-02-10 `[CODE]` Added DB-backed integration coverage for freshness enqueue + machine transitions and retry-exhausted downgrade path.
-- 2026-02-10 `[CODE]` Added `PATCH /postings/{posting_id}` with moderated human auth and posting lifecycle payload contract.
-- 2026-02-10 `[CODE]` Added DB-backed integration coverage for posting lifecycle path (`active -> stale -> archived -> active`) and invalid transition conflict (`closed -> active`).
-- 2026-02-09 `[CODE]` Added F2 trust-policy publication routing via `source_trust_policy` with provenance event writes (`trust_policy_applied`).
+- 2026-02-10 `[CODE]` Added `dedupe.py` scorer v1 with deterministic precision-first confidence over strong signals (hash/URL), medium text similarity, and NER/contact-domain tie-breakers.
+- 2026-02-10 `[CODE]` Wired scorer into extract projection so candidate risk flags/confidence now drive machine merge-policy outcomes (`auto_merged`, `needs_review`, `rejected`).
+- 2026-02-10 `[CODE]` Added shared merge execution helper so manual moderator merges and machine auto-merges share consistent `candidate_merge_decisions` + provenance behavior.
+- 2026-02-10 `[CODE]` Added auto-merge short-circuit to keep canonical posting ownership stable while archiving secondary candidates and retaining discovery/evidence links on the primary.
+- 2026-02-10 `[CODE]` Added review-routing override so uncertain/conflicting dedupe outcomes force moderation queue state even when trust-policy would otherwise auto-publish.
+- 2026-02-10 `[CODE]` Added unit coverage for dedupe scorer thresholds/conflict guards and DB-backed integration coverage for machine auto-merge + review-queue routing.
+- 2026-02-10 `[CODE]` Maintained existing trust-policy event contract while extending payload receipts with merge-policy decision metadata.
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
@@ -46,3 +46,7 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[TOOL]` `UV_CACHE_DIR=/tmp/uv-cache uv run --project api --extra dev ruff check ...` and `UV_CACHE_DIR=/tmp/uv-cache uv run --project workers --extra dev ruff check ...` passed for changed freshness files.
 - 2026-02-10 `[TOOL]` `UV_CACHE_DIR=/tmp/uv-cache uv run --project api --extra dev mypy api/app` and `UV_CACHE_DIR=/tmp/uv-cache uv run --project workers --extra dev mypy workers/app` passed.
 - 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "enqueue_freshness_jobs or freshness_dead_letter" -> make db-down` passed (`2/2` selected).
+- 2026-02-10 `[TOOL]` `uv run --project api --extra dev pytest api/tests/test_dedupe_scorer.py -q` passed (`4/4`).
+- 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/app/services/repository.py api/app/services/dedupe.py api/tests/test_dedupe_scorer.py api/tests/test_discovery_jobs_integration.py` and `uv run --project api --extra dev mypy api/app` passed.
+- 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "dedupe_policy_auto_merges_high_confidence_duplicate_candidate or dedupe_policy_routes_uncertain_match_to_review_queue" -> make db-down` passed (`2/2` selected).
+- 2026-02-10 `[TOOL]` `bash scripts/agent-hygiene-check.sh --mode project` passed.

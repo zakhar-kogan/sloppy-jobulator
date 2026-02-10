@@ -30,8 +30,8 @@
 | D3 | in_progress | Worker runtime now dispatches `check_freshness` with periodic scheduler-triggered enqueue, while structured logs/OTel and richer execution semantics are pending. |
 | E1 | in_progress | Base URL normalization/hash logic exists; per-domain override support is pending. |
 | E2 | not_started | Redirect resolution async job path is not implemented. |
-| E3 | not_started | Dedupe scorer is not implemented. |
-| E4 | in_progress | Manual moderator merge path now records `candidate_merge_decisions` + provenance; auto-merge/review-queue policy engine remains pending. |
+| E3 | done | Dedupe scorer v1 now computes deterministic merge confidence from strong/medium/tie-break signals (URL/hash, text similarity, NER/contact-domain overlap). |
+| E4 | done | Merge policy routing now records machine decisions (`auto_merged`/`needs_review`/`rejected`), auto-applies high-confidence merges, and routes uncertain/conflicting matches to moderation with provenance. |
 | F1 | done | Moderation APIs now cover approve/reject (state patch), merge, and override flows with role checks + audit events. |
 | F2 | in_progress | `source_trust_policy` routing now drives trusted/semi/untrusted publication paths with DB-backed integration coverage; broader policy automation remains pending. |
 | F3 | done | Posting lifecycle transitions are now explicit via moderated `PATCH /postings/{id}` with transition guards, candidate synchronization, provenance writes, and DB-backed integration coverage. |
@@ -55,9 +55,9 @@
 
 ## Next Implementation Steps (Priority Order)
 
-1. Implement `E3` dedupe scorer v1 and wire confidence/risk outputs into `E4` merge policy paths.
-- Add precision-first scorer thresholds and deterministic confidence outputs for merge/no-merge/review decisions.
-- Extend moderation review-queue routing for uncertain matches with provenance receipts tied to merge decisions.
+1. Expand `F2` trust-policy automation to consume richer merge-policy metadata and source-specific routing rules.
+- Add policy options for handling dedupe `needs_review` outcomes by source/trust class.
+- Harden publish routing with additional policy receipts and integration coverage for mixed trust + dedupe edge cases.
 
 ## Workstreams and Task Graph
 

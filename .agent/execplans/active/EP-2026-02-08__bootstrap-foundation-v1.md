@@ -3,7 +3,7 @@
 ## Metadata
 - Status: `ACTIVE`
 - Created: `2026-02-08`
-- Updated: `2026-02-09`
+- Updated: `2026-02-10`
 - Owner: `Codex`
 
 ## Purpose / Big Picture
@@ -39,6 +39,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Harden postings list edge semantics (trimmed filters, case-insensitive tag match, deterministic tie-breaks, null-last deadline/published sorts) with integration coverage.
 - [x] Split CI into fast checks vs DB-backed integration required checks (`M1 + L1`).
 - [x] Start `A3/F2` baseline: role bootstrap SQL automation + trust-policy-based publish routing with integration coverage.
+- [x] Implement `E3` dedupe scorer v1 and wire deterministic merge confidence/risk outputs into `E4` merge policy routing with auto-merge/review decision recording.
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
@@ -58,6 +59,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-09: Split CI API checks into `api-fast` and `api-integration-db`; documented required branch checks in README.
 - 2026-02-09: Added `source_trust_policy` resolution in extract projection so publish decisions route to `published` vs `needs_review`, and added integration coverage for trusted/semi-trusted/untrusted plus source-key override paths.
 - 2026-02-09: Replaced placeholder admin bootstrap script with deterministic role/provenance SQL generation (`--user-id|--email`, `--role`) and documented invocation in README/runbook.
+- 2026-02-10: Added `E3` dedupe scorer module and integrated `E4` machine routing so extract projection now performs precision-first auto-merge/review/reject decisions with audited `candidate_merge_decisions` + provenance.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -89,4 +91,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Expand `F2` rule evaluation surface (beyond confidence/conflict baseline) and finish `F3` lifecycle transitions.
+1. Expand `F2` policy rule surface to leverage merge-policy outcomes (`auto_merged/needs_review/rejected`) with source-aware routing controls.

@@ -19,6 +19,7 @@
 16. For multi-entity lifecycle domains, define explicit transition guards per entity and enforce deterministic cross-entity mapping in the same transaction (e.g., posting status to candidate state).
 17. For new durable job kinds, branch behavior in one `submit_job_result` transaction path so retries/dead-letter semantics stay centralized and consistent across workers.
 18. When reading dynamic JSON payloads in typed worker code, normalize to typed locals first (`raw_payload` -> `dict[str, Any]`) before field access to keep mypy stable.
+19. For policy engines (dedupe/trust/moderation), keep score computation pure and deterministic in dedicated modules, and apply DB side effects (state transitions, merge writes, provenance) in one transactional repository layer.
 
 ## Anti-patterns
 1. Hidden side effects without tests or receipts.

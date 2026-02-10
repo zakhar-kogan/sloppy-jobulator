@@ -10,6 +10,13 @@ import asyncpg  # type: ignore[import-untyped]
 from asyncpg import exceptions as pg_exc
 
 from app.core.config import get_settings
+from app.services.dedupe import (
+    DedupeCandidateSnapshot,
+    DedupePolicyDecision,
+    evaluate_merge_policy,
+    extract_contact_domains,
+    extract_named_entities,
+)
 
 
 class RepositoryError(Exception):
@@ -777,6 +784,13 @@ class PostgresRepository:
         )
         dedupe_confidence = self._coerce_float(extraction.get("dedupe_confidence"))
         risk_flags = self._coerce_text_list(extraction.get("risk_flags"))
+        country = self._coerce_text(projection_payload.get("country"))
+        region = self._coerce_text(projection_payload.get("region"))
+        city = self._coerce_text(projection_payload.get("city"))
+        tags = self._coerce_text_list(projection_payload.get("tags"))
+        areas = self._coerce_text_list(projection_payload.get("areas"))
+        description_text = self._coerce_text(projection_payload.get("description_text"))
+        application_url = self._coerce_text(projection_payload.get("application_url"))
         source_key_hint = self._resolve_source_key_hint(
             extraction=extraction,
             projection_payload=projection_payload,
@@ -794,6 +808,25 @@ class PostgresRepository:
         can_project_posting = bool(
             has_projection_signal and title and organization_name and canonical_url and normalized_url and canonical_hash
         )
+        merge_policy = await self._evaluate_dedupe_merge_policy(
+            conn=conn,
+            extraction=extraction,
+            projection_payload=projection_payload,
+            canonical_hash=canonical_hash,
+            normalized_url=normalized_url,
+            canonical_url=canonical_url,
+            application_url=application_url,
+            title=title,
+            organization_name=organization_name,
+            description_text=description_text,
+            tags=tags,
+            areas=areas,
+            country=country,
+            region=region,
+            city=city,
+            can_project_posting=can_project_posting,
+        )
+        risk_flags = self._merge_risk_flags(risk_flags, merge_policy.risk_flags)
         (
             default_state,
             default_posting_status,
@@ -809,12 +842,18 @@ class PostgresRepository:
             candidate_state = "processed"
         if can_project_posting and candidate_state == "published" and default_state != "published":
             candidate_state = "needs_review"
+        if merge_policy.decision == "needs_review":
+            candidate_state = "needs_review"
+        elif merge_policy.decision == "auto_merged":
+            candidate_state = "archived"
 
         posting_status = (
             self._coerce_posting_status(projection_payload.get("status"), default=default_posting_status)
             if candidate_state == "published"
             else "archived"
         )
+        if merge_policy.decision in {"needs_review", "auto_merged"}:
+            posting_status = "archived"
 
         candidate_id = await conn.fetchval(
             """
@@ -871,6 +910,82 @@ class PostgresRepository:
             actor_module_db_id,
             json.dumps({"job_id": job_id, "discovery_id": discovery_id, "state": candidate_state}),
         )
+
+        merge_policy_payload: dict[str, Any] = {
+            "merge_decision": merge_policy.decision,
+            "merge_primary_candidate_id": merge_policy.primary_candidate_id,
+            "merge_confidence": merge_policy.confidence,
+            "merge_risk_flags": merge_policy.risk_flags,
+            "merge_metadata": merge_policy.metadata,
+        }
+        skip_posting_projection = False
+        if merge_policy.primary_candidate_id and merge_policy.decision == "auto_merged":
+            try:
+                await self._apply_candidate_merge(
+                    conn=conn,
+                    primary_candidate_id=merge_policy.primary_candidate_id,
+                    secondary_candidate_id=candidate_id,
+                    actor_type="machine",
+                    actor_id=actor_module_db_id,
+                    reason="dedupe scorer auto merge",
+                    decision="auto_merged",
+                    decided_by="machine_dedupe_v1",
+                    confidence=merge_policy.confidence,
+                    metadata={"source": "dedupe_scorer_v1", **merge_policy.metadata},
+                )
+                skip_posting_projection = True
+            except (RepositoryConflictError, RepositoryNotFoundError):
+                merge_policy_payload["merge_decision"] = "needs_review"
+                merge_policy_payload["merge_risk_flags"] = self._merge_risk_flags(
+                    merge_policy.risk_flags,
+                    ["conflict_auto_merge_blocked"],
+                )
+                merge_policy_payload["merge_metadata"] = {
+                    **merge_policy.metadata,
+                    "auto_merge_blocked": True,
+                }
+                await conn.execute(
+                    """
+                    update posting_candidates
+                    set state = 'needs_review'
+                    where id = $1::uuid
+                    """,
+                    candidate_id,
+                )
+                candidate_state = "needs_review"
+                posting_status = "archived"
+                await self._record_candidate_merge_decision(
+                    conn=conn,
+                    primary_candidate_id=merge_policy.primary_candidate_id,
+                    secondary_candidate_id=candidate_id,
+                    decision="needs_review",
+                    confidence=merge_policy.confidence,
+                    decided_by="machine_dedupe_v1",
+                    rationale="auto merge blocked; queued for moderation",
+                    metadata={"source": "dedupe_scorer_v1", **merge_policy_payload["merge_metadata"]},
+                    actor_type="machine",
+                    actor_id=actor_module_db_id,
+                )
+        elif merge_policy.primary_candidate_id and merge_policy.decision in {"needs_review", "rejected"}:
+            await self._record_candidate_merge_decision(
+                conn=conn,
+                primary_candidate_id=merge_policy.primary_candidate_id,
+                secondary_candidate_id=candidate_id,
+                decision=merge_policy.decision,
+                confidence=merge_policy.confidence,
+                decided_by="machine_dedupe_v1",
+                rationale="dedupe scorer routing",
+                metadata={"source": "dedupe_scorer_v1", **merge_policy.metadata},
+                actor_type="machine",
+                actor_id=actor_module_db_id,
+            )
+
+        if merge_policy_payload["merge_decision"] == "needs_review":
+            trust_policy_payload["reason"] = "dedupe_review_required"
+        if merge_policy_payload["merge_decision"] == "auto_merged":
+            trust_policy_payload["reason"] = "dedupe_auto_merged"
+        trust_policy_payload.update(merge_policy_payload)
+
         await conn.execute(
             """
             insert into provenance_events (
@@ -896,7 +1011,7 @@ class PostgresRepository:
             ),
         )
 
-        if not can_project_posting:
+        if not can_project_posting or skip_posting_projection:
             return
 
         source_refs = self._coerce_json_list(projection_payload.get("source_refs")) or [{"discovery_id": discovery_id}]
@@ -982,14 +1097,14 @@ class PostgresRepository:
             self._coerce_text(projection_payload.get("degree_level")),
             self._coerce_text(projection_payload.get("opportunity_kind")),
             organization_name,
-            self._coerce_text(projection_payload.get("country")),
-            self._coerce_text(projection_payload.get("region")),
-            self._coerce_text(projection_payload.get("city")),
+            country,
+            region,
+            city,
             self._coerce_bool(projection_payload.get("remote")),
-            self._coerce_text_list(projection_payload.get("tags")),
-            self._coerce_text_list(projection_payload.get("areas")),
-            self._coerce_text(projection_payload.get("description_text")),
-            self._coerce_text(projection_payload.get("application_url")),
+            tags,
+            areas,
+            description_text,
+            application_url,
             deadline,
             json.dumps(source_refs),
             posting_status,
@@ -1332,179 +1447,268 @@ class PostgresRepository:
         actor_user_id: str,
         reason: str | None,
     ) -> dict[str, Any]:
-        if primary_candidate_id == secondary_candidate_id:
-            raise RepositoryConflictError("primary and secondary candidate ids must differ")
-
         pool = await self._get_pool()
         try:
             async with pool.acquire() as conn:
                 async with conn.transaction():
-                    locked_rows = await conn.fetch(
-                        """
-                        select
-                          id::text as id,
-                          state::text as state
-                        from posting_candidates
-                        where id = any(array[$1::uuid, $2::uuid])
-                        order by id
-                        for update
-                        """,
-                        primary_candidate_id,
-                        secondary_candidate_id,
+                    return await self._apply_candidate_merge(
+                        conn=conn,
+                        primary_candidate_id=primary_candidate_id,
+                        secondary_candidate_id=secondary_candidate_id,
+                        actor_type="human",
+                        actor_id=actor_user_id,
+                        reason=reason,
+                        decision="manual_merged",
+                        decided_by="human_moderator",
+                        confidence=None,
+                        metadata={"actor_user_id": actor_user_id},
                     )
-                    if len(locked_rows) != 2:
-                        raise RepositoryNotFoundError("candidate not found")
-
-                    primary_posting_id = await conn.fetchval(
-                        """
-                        select id::text
-                        from postings
-                        where candidate_id = $1::uuid
-                        """,
-                        primary_candidate_id,
-                    )
-                    secondary_posting_id = await conn.fetchval(
-                        """
-                        select id::text
-                        from postings
-                        where candidate_id = $1::uuid
-                        """,
-                        secondary_candidate_id,
-                    )
-                    if primary_posting_id and secondary_posting_id and primary_posting_id != secondary_posting_id:
-                        raise RepositoryConflictError("cannot merge candidates that both already have postings")
-
-                    await conn.execute(
-                        """
-                        insert into candidate_discoveries (candidate_id, discovery_id)
-                        select $1::uuid, discovery_id
-                        from candidate_discoveries
-                        where candidate_id = $2::uuid
-                        on conflict do nothing
-                        """,
-                        primary_candidate_id,
-                        secondary_candidate_id,
-                    )
-                    await conn.execute(
-                        """
-                        insert into candidate_evidence (candidate_id, evidence_id)
-                        select $1::uuid, evidence_id
-                        from candidate_evidence
-                        where candidate_id = $2::uuid
-                        on conflict do nothing
-                        """,
-                        primary_candidate_id,
-                        secondary_candidate_id,
-                    )
-
-                    moved_posting_id: str | None = None
-                    if not primary_posting_id and secondary_posting_id:
-                        await conn.execute(
-                            """
-                            update postings
-                            set candidate_id = $1::uuid
-                            where id = $2::uuid
-                            """,
-                            primary_candidate_id,
-                            secondary_posting_id,
-                        )
-                        moved_posting_id = secondary_posting_id
-
-                    await conn.execute(
-                        """
-                        update posting_candidates
-                        set state = 'archived'
-                        where id = $1::uuid
-                        """,
-                        secondary_candidate_id,
-                    )
-                    await conn.execute(
-                        """
-                        insert into candidate_merge_decisions (
-                          primary_candidate_id,
-                          secondary_candidate_id,
-                          decision,
-                          decided_by,
-                          rationale,
-                          metadata
-                        )
-                        values ($1::uuid, $2::uuid, 'manual_merged', $3, $4, $5::jsonb)
-                        on conflict (primary_candidate_id, secondary_candidate_id)
-                        do update set
-                          decision = excluded.decision,
-                          decided_by = excluded.decided_by,
-                          rationale = excluded.rationale,
-                          metadata = excluded.metadata
-                        """,
-                        primary_candidate_id,
-                        secondary_candidate_id,
-                        "human_moderator",
-                        reason,
-                        json.dumps({"actor_user_id": actor_user_id}),
-                    )
-
-                    await conn.execute(
-                        """
-                        insert into provenance_events (
-                          entity_type,
-                          entity_id,
-                          event_type,
-                          actor_type,
-                          actor_id,
-                          payload
-                        )
-                        values ('posting_candidate', $1::uuid, 'merge_applied', 'human', $2::uuid, $3::jsonb)
-                        """,
-                        primary_candidate_id,
-                        actor_user_id,
-                        json.dumps({"secondary_candidate_id": secondary_candidate_id, "reason": reason}),
-                    )
-                    await conn.execute(
-                        """
-                        insert into provenance_events (
-                          entity_type,
-                          entity_id,
-                          event_type,
-                          actor_type,
-                          actor_id,
-                          payload
-                        )
-                        values ('posting_candidate', $1::uuid, 'merged_away', 'human', $2::uuid, $3::jsonb)
-                        """,
-                        secondary_candidate_id,
-                        actor_user_id,
-                        json.dumps({"primary_candidate_id": primary_candidate_id, "reason": reason}),
-                    )
-                    if moved_posting_id:
-                        await conn.execute(
-                            """
-                            insert into provenance_events (
-                              entity_type,
-                              entity_id,
-                              event_type,
-                              actor_type,
-                              actor_id,
-                              payload
-                            )
-                            values ('posting', $1::uuid, 'candidate_reassigned', 'human', $2::uuid, $3::jsonb)
-                            """,
-                            moved_posting_id,
-                            actor_user_id,
-                            json.dumps(
-                                {
-                                    "from_candidate_id": secondary_candidate_id,
-                                    "to_candidate_id": primary_candidate_id,
-                                    "reason": reason,
-                                }
-                            ),
-                        )
-
-                    row = await self._fetch_candidate_row(conn=conn, candidate_id=primary_candidate_id)
-                    if not row:
-                        raise RepositoryNotFoundError("candidate not found")
-                    return self._candidate_row_to_dict(row)
         except (pg_exc.InvalidTextRepresentationError, asyncpg.DataError) as exc:
             raise RepositoryConflictError("invalid candidate id") from exc
+
+    async def _apply_candidate_merge(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        primary_candidate_id: str,
+        secondary_candidate_id: str,
+        actor_type: str,
+        actor_id: str,
+        reason: str | None,
+        decision: str,
+        decided_by: str,
+        confidence: float | None,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        if primary_candidate_id == secondary_candidate_id:
+            raise RepositoryConflictError("primary and secondary candidate ids must differ")
+
+        locked_rows = await conn.fetch(
+            """
+            select
+              id::text as id
+            from posting_candidates
+            where id = any(array[$1::uuid, $2::uuid])
+            order by id
+            for update
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+        )
+        if len(locked_rows) != 2:
+            raise RepositoryNotFoundError("candidate not found")
+
+        primary_posting_id = await conn.fetchval(
+            """
+            select id::text
+            from postings
+            where candidate_id = $1::uuid
+            """,
+            primary_candidate_id,
+        )
+        secondary_posting_id = await conn.fetchval(
+            """
+            select id::text
+            from postings
+            where candidate_id = $1::uuid
+            """,
+            secondary_candidate_id,
+        )
+        if primary_posting_id and secondary_posting_id and primary_posting_id != secondary_posting_id:
+            raise RepositoryConflictError("cannot merge candidates that both already have postings")
+
+        await conn.execute(
+            """
+            insert into candidate_discoveries (candidate_id, discovery_id)
+            select $1::uuid, discovery_id
+            from candidate_discoveries
+            where candidate_id = $2::uuid
+            on conflict do nothing
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+        )
+        await conn.execute(
+            """
+            insert into candidate_evidence (candidate_id, evidence_id)
+            select $1::uuid, evidence_id
+            from candidate_evidence
+            where candidate_id = $2::uuid
+            on conflict do nothing
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+        )
+
+        moved_posting_id: str | None = None
+        if not primary_posting_id and secondary_posting_id:
+            await conn.execute(
+                """
+                update postings
+                set candidate_id = $1::uuid
+                where id = $2::uuid
+                """,
+                primary_candidate_id,
+                secondary_posting_id,
+            )
+            moved_posting_id = secondary_posting_id
+
+        await conn.execute(
+            """
+            update posting_candidates
+            set state = 'archived'
+            where id = $1::uuid
+            """,
+            secondary_candidate_id,
+        )
+
+        await self._record_candidate_merge_decision(
+            conn=conn,
+            primary_candidate_id=primary_candidate_id,
+            secondary_candidate_id=secondary_candidate_id,
+            decision=decision,
+            confidence=confidence,
+            decided_by=decided_by,
+            rationale=reason,
+            metadata=metadata,
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
+
+        await conn.execute(
+            """
+            insert into provenance_events (
+              entity_type,
+              entity_id,
+              event_type,
+              actor_type,
+              actor_id,
+              payload
+            )
+            values ('posting_candidate', $1::uuid, 'merge_applied', $2, $3::uuid, $4::jsonb)
+            """,
+            primary_candidate_id,
+            actor_type,
+            actor_id,
+            json.dumps({"secondary_candidate_id": secondary_candidate_id, "reason": reason, "decision": decision}),
+        )
+        await conn.execute(
+            """
+            insert into provenance_events (
+              entity_type,
+              entity_id,
+              event_type,
+              actor_type,
+              actor_id,
+              payload
+            )
+            values ('posting_candidate', $1::uuid, 'merged_away', $2, $3::uuid, $4::jsonb)
+            """,
+            secondary_candidate_id,
+            actor_type,
+            actor_id,
+            json.dumps({"primary_candidate_id": primary_candidate_id, "reason": reason, "decision": decision}),
+        )
+        if moved_posting_id:
+            await conn.execute(
+                """
+                insert into provenance_events (
+                  entity_type,
+                  entity_id,
+                  event_type,
+                  actor_type,
+                  actor_id,
+                  payload
+                )
+                values ('posting', $1::uuid, 'candidate_reassigned', $2, $3::uuid, $4::jsonb)
+                """,
+                moved_posting_id,
+                actor_type,
+                actor_id,
+                json.dumps(
+                    {
+                        "from_candidate_id": secondary_candidate_id,
+                        "to_candidate_id": primary_candidate_id,
+                        "reason": reason,
+                        "decision": decision,
+                    }
+                ),
+            )
+
+        row = await self._fetch_candidate_row(conn=conn, candidate_id=primary_candidate_id)
+        if not row:
+            raise RepositoryNotFoundError("candidate not found")
+        return self._candidate_row_to_dict(row)
+
+    async def _record_candidate_merge_decision(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        primary_candidate_id: str,
+        secondary_candidate_id: str,
+        decision: str,
+        confidence: float | None,
+        decided_by: str,
+        rationale: str | None,
+        metadata: dict[str, Any],
+        actor_type: str,
+        actor_id: str,
+    ) -> None:
+        await conn.execute(
+            """
+            insert into candidate_merge_decisions (
+              primary_candidate_id,
+              secondary_candidate_id,
+              decision,
+              confidence,
+              decided_by,
+              rationale,
+              metadata
+            )
+            values ($1::uuid, $2::uuid, $3::merge_decision, $4, $5, $6, $7::jsonb)
+            on conflict (primary_candidate_id, secondary_candidate_id)
+            do update set
+              decision = excluded.decision,
+              confidence = excluded.confidence,
+              decided_by = excluded.decided_by,
+              rationale = excluded.rationale,
+              metadata = excluded.metadata
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+            decision,
+            round(confidence, 4) if confidence is not None else None,
+            decided_by,
+            rationale,
+            json.dumps(metadata),
+        )
+        await conn.execute(
+            """
+            insert into provenance_events (
+              entity_type,
+              entity_id,
+              event_type,
+              actor_type,
+              actor_id,
+              payload
+            )
+            values ('posting_candidate', $1::uuid, 'merge_decision_recorded', $2, $3::uuid, $4::jsonb)
+            """,
+            secondary_candidate_id,
+            actor_type,
+            actor_id,
+            json.dumps(
+                {
+                    "primary_candidate_id": primary_candidate_id,
+                    "secondary_candidate_id": secondary_candidate_id,
+                    "decision": decision,
+                    "confidence": round(confidence, 4) if confidence is not None else None,
+                    "decided_by": decided_by,
+                    "rationale": rationale,
+                    "metadata": metadata,
+                }
+            ),
+        )
 
     async def list_postings(
         self,
@@ -2330,6 +2534,17 @@ class PostgresRepository:
         return items
 
     @staticmethod
+    def _coerce_json_dict(value: Any) -> dict[str, Any]:
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                return {}
+        if isinstance(value, dict):
+            return value
+        return {}
+
+    @staticmethod
     def _has_projection_signal(*, extraction: dict[str, Any], projection_payload: dict[str, Any]) -> bool:
         if "posting" in extraction and isinstance(extraction["posting"], dict):
             return True
@@ -2350,6 +2565,159 @@ class PostgresRepository:
             "source_refs",
         }
         return any(key in projection_payload for key in projection_keys)
+
+    @staticmethod
+    def _merge_risk_flags(*groups: list[str]) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for group in groups:
+            for value in group:
+                normalized = value.strip()
+                if not normalized:
+                    continue
+                key = normalized.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(normalized)
+        return merged
+
+    async def _evaluate_dedupe_merge_policy(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        extraction: dict[str, Any],
+        projection_payload: dict[str, Any],
+        canonical_hash: str | None,
+        normalized_url: str | None,
+        canonical_url: str | None,
+        application_url: str | None,
+        title: str | None,
+        organization_name: str | None,
+        description_text: str | None,
+        tags: list[str],
+        areas: list[str],
+        country: str | None,
+        region: str | None,
+        city: str | None,
+        can_project_posting: bool,
+    ) -> DedupePolicyDecision:
+        if not can_project_posting:
+            return DedupePolicyDecision(
+                decision="none",
+                primary_candidate_id=None,
+                confidence=None,
+                risk_flags=[],
+                metadata={"reason": "projection_unavailable"},
+            )
+        if not any([canonical_hash, normalized_url, canonical_url, application_url, organization_name]):
+            return DedupePolicyDecision(
+                decision="none",
+                primary_candidate_id=None,
+                confidence=None,
+                risk_flags=[],
+                metadata={"reason": "missing_dedupe_keys"},
+            )
+
+        rows = await conn.fetch(
+            """
+            select
+              pc.id::text as candidate_id,
+              pc.extracted_fields,
+              p.id::text as posting_id,
+              p.canonical_hash,
+              p.normalized_url,
+              p.canonical_url,
+              p.application_url,
+              p.title,
+              p.organization_name,
+              p.description_text,
+              p.tags,
+              p.areas,
+              p.country,
+              p.region,
+              p.city
+            from posting_candidates pc
+            join postings p on p.candidate_id = pc.id
+            where pc.state::text <> 'archived'
+              and (
+                ($1::text is not null and p.canonical_hash = $1)
+                or ($2::text is not null and p.normalized_url = $2)
+                or ($3::text is not null and p.canonical_url = $3)
+                or ($4::text is not null and p.application_url = $4)
+                or ($5::text is not null and lower(p.organization_name) = lower($5))
+              )
+            order by pc.updated_at desc, pc.id asc
+            limit 25
+            """,
+            canonical_hash,
+            normalized_url,
+            canonical_url,
+            application_url,
+            organization_name,
+        )
+        if not rows:
+            return DedupePolicyDecision(
+                decision="none",
+                primary_candidate_id=None,
+                confidence=None,
+                risk_flags=[],
+                metadata={"reason": "no_candidate_matches"},
+            )
+
+        incoming = DedupeCandidateSnapshot(
+            candidate_id="incoming",
+            canonical_hash=canonical_hash,
+            normalized_url=normalized_url,
+            canonical_url=canonical_url,
+            application_url=application_url,
+            title=title,
+            organization_name=organization_name,
+            description_text=description_text,
+            tags=tags,
+            areas=areas,
+            country=country,
+            region=region,
+            city=city,
+            named_entities=extract_named_entities(extraction),
+            contact_domains=self._merge_risk_flags(
+                extract_contact_domains(extraction),
+                extract_contact_domains(projection_payload),
+            ),
+            has_posting=True,
+        )
+
+        existing: list[DedupeCandidateSnapshot] = []
+        for row in rows:
+            extracted_fields = self._coerce_json_dict(row["extracted_fields"])
+            extracted_posting = self._coerce_json_dict(extracted_fields.get("posting"))
+            existing.append(
+                DedupeCandidateSnapshot(
+                    candidate_id=row["candidate_id"],
+                    canonical_hash=self._coerce_text(row["canonical_hash"]),
+                    normalized_url=self._coerce_text(row["normalized_url"]),
+                    canonical_url=self._coerce_text(row["canonical_url"]),
+                    application_url=self._coerce_text(row["application_url"]),
+                    title=self._coerce_text(row["title"]) or self._coerce_text(extracted_posting.get("title")),
+                    organization_name=self._coerce_text(row["organization_name"])
+                    or self._coerce_text(extracted_posting.get("organization_name")),
+                    description_text=self._coerce_text(row["description_text"])
+                    or self._coerce_text(extracted_posting.get("description_text")),
+                    tags=list(row["tags"] or []),
+                    areas=list(row["areas"] or []),
+                    country=self._coerce_text(row["country"]),
+                    region=self._coerce_text(row["region"]),
+                    city=self._coerce_text(row["city"]),
+                    named_entities=extract_named_entities(extracted_fields),
+                    contact_domains=self._merge_risk_flags(
+                        extract_contact_domains(extracted_fields),
+                        extract_contact_domains(extracted_posting),
+                    ),
+                    has_posting=bool(row["posting_id"]),
+                )
+            )
+
+        return evaluate_merge_policy(incoming=incoming, existing=existing)
 
     @staticmethod
     def _resolve_source_key_hint(

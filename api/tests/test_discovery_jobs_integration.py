@@ -1250,6 +1250,167 @@ def test_moderation_merge_conflict_when_both_candidates_have_postings(
     assert merge_response.status_code == 409
 
 
+def test_dedupe_policy_auto_merges_high_confidence_duplicate_candidate(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    primary_candidate_id, primary_posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-dedupe-auto-primary",
+        canonical_hash="dedupe-auto-merge-hash",
+    )
+
+    _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-dedupe-auto-secondary",
+        canonical_hash="dedupe-auto-merge-hash",
+    )
+
+    secondary_candidate_id = _run(
+        _fetchval(
+            database_url,
+            """
+            select secondary_candidate_id::text
+            from candidate_merge_decisions
+            where primary_candidate_id = $1::uuid
+              and decision = 'auto_merged'
+            order by created_at desc
+            limit 1
+            """,
+            primary_candidate_id,
+        )
+    )
+    assert secondary_candidate_id
+    assert secondary_candidate_id != primary_candidate_id
+
+    posting_candidate_id = _run(
+        _fetchval(
+            database_url,
+            "select candidate_id::text from postings where id = $1::uuid",
+            primary_posting_id,
+        )
+    )
+    assert posting_candidate_id == primary_candidate_id
+
+    discovery_link_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from candidate_discoveries
+            where candidate_id = $1::uuid
+            """,
+            primary_candidate_id,
+        )
+    )
+    assert discovery_link_count == 2
+
+    secondary_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            secondary_candidate_id,
+        )
+    )
+    assert secondary_state == "archived"
+
+    merge_confidence = _run(
+        _fetchval(
+            database_url,
+            """
+            select confidence
+            from candidate_merge_decisions
+            where primary_candidate_id = $1::uuid
+              and secondary_candidate_id = $2::uuid
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+        )
+    )
+    assert merge_confidence is not None
+    assert float(merge_confidence) >= 0.93
+
+    merge_actor_type = _run(
+        _fetchval(
+            database_url,
+            """
+            select actor_type
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'merge_applied'
+            order by id desc
+            limit 1
+            """,
+            primary_candidate_id,
+        )
+    )
+    assert merge_actor_type == "machine"
+
+
+def test_dedupe_policy_routes_uncertain_match_to_review_queue(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    primary_candidate_id, _ = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-dedupe-review-primary",
+        canonical_hash="dedupe-review-primary-hash",
+    )
+    secondary_candidate_id, secondary_posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-dedupe-review-secondary",
+        canonical_hash="dedupe-review-secondary-hash",
+    )
+
+    decision = _run(
+        _fetchval(
+            database_url,
+            """
+            select decision::text
+            from candidate_merge_decisions
+            where primary_candidate_id = $1::uuid
+              and secondary_candidate_id = $2::uuid
+            order by created_at desc
+            limit 1
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+        )
+    )
+    assert decision == "needs_review"
+
+    secondary_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            secondary_candidate_id,
+        )
+    )
+    posting_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            secondary_posting_id,
+        )
+    )
+    risk_flags = _run(
+        _fetchval(
+            database_url,
+            "select risk_flags from posting_candidates where id = $1::uuid",
+            secondary_candidate_id,
+        )
+    )
+
+    assert secondary_state == "needs_review"
+    assert posting_status == "archived"
+    assert "manual_review_low_signal" in list(risk_flags or [])
+
+
 def test_trust_policy_blocks_publish_when_below_confidence_for_trusted_source(
     api_client: TestClient,
     database_url: str,
