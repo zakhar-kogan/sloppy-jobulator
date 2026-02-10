@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 const sampleRows = [
   {
     title: "Research Assistant in Computational Biology",
@@ -19,6 +21,11 @@ export default function HomePage() {
         <p>
           Bootstrap catalogue UI connected to v1 API contracts. Search, filter, and moderation surfaces follow in
           upcoming phases.
+        </p>
+        <p>
+          <Link className="inline-link" href="/admin/source-trust-policy">
+            Open source trust policy admin
+          </Link>
         </p>
 
         <div className="controls">

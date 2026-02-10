@@ -46,6 +46,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Expose admin trust-policy management API surface (`GET/PUT/PATCH /admin/source-trust-policy`) wired to repository-validated writes with DB-backed contract tests.
 - [x] Emit provenance audit events for admin trust-policy writes/toggles and assert them in DB-backed integration tests.
 - [x] Add runbook API-first operator guidance for trust-policy management and audit verification (`curl` + SQL receipts).
+- [x] Wire admin UI (`H2`) trust-policy management flows to `GET/PUT/PATCH /admin/source-trust-policy` via Next.js proxy routes.
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
@@ -73,6 +74,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-10: Added admin trust-policy API endpoints for list/upsert/enable-toggle, backed by repository validation and covered with integration tests for success, authz, and invalid-rules responses.
 - 2026-02-10: Added provenance event writes for admin trust-policy upsert/enable changes and extended admin integration tests to assert emitted audit payloads/actor attribution.
 - 2026-02-10: Expanded runbook with API-based trust-policy operator flow (admin `GET/PUT/PATCH`) and provenance verification query patterns to reduce SQL-only policy management.
+- 2026-02-10: Added `web/app/admin/source-trust-policy` UI and Next.js server proxy routes (`web/app/api/admin/source-trust-policy/**`) so operators can list/upsert/toggle policies against the admin API surface.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -104,4 +106,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Wire admin UI (`H2`) to `GET/PUT/PATCH /admin/source-trust-policy`.
+1. Continue `H2` beyond trust-policy management (moderation queue/merge/modules/jobs surfaces) while reusing the server-side admin API proxy pattern.

@@ -8,7 +8,8 @@
 2. Start local services:
 - API: `cd api && uvicorn app.main:app --reload`
 - Worker: `cd workers && python -m app.main`
-- Web: `fnm use 24.13.0 && pnpm --dir web dev`
+- Web (public shell): `fnm use 24.13.0 && pnpm --dir web dev`
+- Web (admin trust-policy console enabled): `SJ_API_URL=http://localhost:8000 SJ_ADMIN_BEARER=<admin-jwt> fnm use 24.13.0 && pnpm --dir web dev`
 3. Run app locally: start API + web for browsing, then worker for job processing.
 
 ## Build/test/quality
@@ -219,6 +220,9 @@ limit 20;
 12. Event semantics:
 - `policy_upserted`: emitted on admin `PUT`; payload includes `operation` (`created|updated`) plus current policy fields.
 - `policy_enabled_changed`: emitted on admin `PATCH`; payload includes `previous_enabled` and new `enabled` value.
+13. Web admin console path:
+- URL: `/admin/source-trust-policy` in the Next.js app.
+- The page calls Next.js proxy routes (`/api/admin/source-trust-policy` and `/api/admin/source-trust-policy/{sourceKey}`), which require `SJ_API_URL` and `SJ_ADMIN_BEARER` env vars on the web server process.
 
 ## Incident basics
 1. Health check endpoint/command: `GET /healthz` on API.

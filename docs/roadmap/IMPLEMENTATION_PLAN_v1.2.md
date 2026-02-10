@@ -38,7 +38,7 @@
 | G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
 | G2 | done | Freshness scheduler endpoint + worker cadence now enqueue `check_freshness` jobs; result/dead-letter paths apply deterministic posting downgrade/archive transitions with provenance and integration coverage. |
 | H1 | in_progress | Minimal Next.js public shell exists; full catalogue UX pending. |
-| H2 | not_started | Admin/moderator UI not implemented. |
+| H2 | in_progress | Admin trust-policy console is wired to `GET/PUT/PATCH /admin/source-trust-policy` (list/upsert/enable toggle) via Next.js proxy routes; broader moderator cockpit flows remain pending. |
 | I1 | not_started | TaskRouter abstraction not implemented. |
 | I2 | not_started | LiteLLM adapter not implemented. |
 | J1 | not_started | OTel instrumentation not implemented. |
@@ -56,7 +56,7 @@
 ## Next Implementation Steps (Priority Order)
 
 1. Continue `F2` trust-policy automation hardening around operator ergonomics and policy management surfaces.
-- Expose policy-management flows in admin UI (`H2`) against the new `GET/PUT/PATCH /admin/source-trust-policy` API surface.
+- Expand `H2` beyond trust-policy management to moderation queues/merge tooling/modules/jobs while reusing the server-side admin API proxy pattern.
 
 ## Workstreams and Task Graph
 
