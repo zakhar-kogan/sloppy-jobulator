@@ -34,3 +34,4 @@
 ## Revision Log
 - `2026-02-10`: initial entry.
 - `2026-02-10`: validated again while running F2 trust-policy mixed-trust/validation regression selectors (`8/8`) with sandbox fallback to escalated localhost access.
+- `2026-02-10`: validated with admin policy API + strict-write selectors (`7/7`) using the same `UV_CACHE_DIR` + escalation playbook.

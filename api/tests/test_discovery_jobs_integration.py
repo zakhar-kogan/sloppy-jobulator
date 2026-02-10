@@ -1255,6 +1255,121 @@ def test_moderation_merge_conflict_when_both_candidates_have_postings(
     assert merge_response.status_code == 409
 
 
+def test_admin_source_trust_policy_crud_and_filters(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001001")
+    auth_headers = {"Authorization": "Bearer admin-token"}
+    source_key = "tests:admin-policy-crud"
+
+    put_response = api_client.put(
+        f"/admin/source-trust-policy/{source_key}",
+        json={
+            "trust_level": "semi_trusted",
+            "auto_publish": True,
+            "requires_moderation": True,
+            "rules_json": {
+                "min_confidence": 0.9,
+                "merge_decision_actions": {"needs_review": "REJECT"},
+                "moderation_routes": {"needs_review": "dedupe.admin_review_queue"},
+            },
+            "enabled": True,
+        },
+        headers=auth_headers,
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["source_key"] == source_key
+    assert put_response.json()["rules_json"]["merge_decision_actions"]["needs_review"] == "reject"
+
+    list_response = api_client.get(
+        "/admin/source-trust-policy",
+        params={"source_key": source_key, "enabled": True},
+        headers=auth_headers,
+    )
+    assert list_response.status_code == 200
+    listed_rows = list_response.json()
+    assert len(listed_rows) == 1
+    assert listed_rows[0]["source_key"] == source_key
+
+    disable_response = api_client.patch(
+        f"/admin/source-trust-policy/{source_key}",
+        json={"enabled": False},
+        headers=auth_headers,
+    )
+    assert disable_response.status_code == 200
+    assert disable_response.json()["enabled"] is False
+
+    enabled_filter_response = api_client.get(
+        "/admin/source-trust-policy",
+        params={"source_key": source_key, "enabled": True},
+        headers=auth_headers,
+    )
+    assert enabled_filter_response.status_code == 200
+    assert enabled_filter_response.json() == []
+
+    disabled_filter_response = api_client.get(
+        "/admin/source-trust-policy",
+        params={"source_key": source_key, "enabled": False},
+        headers=auth_headers,
+    )
+    assert disabled_filter_response.status_code == 200
+    disabled_rows = disabled_filter_response.json()
+    assert len(disabled_rows) == 1
+    assert disabled_rows[0]["enabled"] is False
+
+
+def test_admin_source_trust_policy_requires_admin_scope(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="moderator", user_id="00000000-0000-0000-0000-000000001002")
+
+    response = api_client.get(
+        "/admin/source-trust-policy",
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert response.status_code == 403
+    assert "admin:write" in response.json()["detail"]
+
+
+def test_admin_source_trust_policy_put_rejects_invalid_rules_json(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001003")
+
+    response = api_client.put(
+        "/admin/source-trust-policy/tests:admin-invalid-rules",
+        json={
+            "trust_level": "trusted",
+            "auto_publish": True,
+            "requires_moderation": False,
+            "rules_json": {
+                "merge_decision_actions": {"needs_review": "publish_now"},
+            },
+            "enabled": True,
+        },
+        headers={"Authorization": "Bearer admin-token"},
+    )
+    assert response.status_code == 422
+    assert "merge_decision_actions.needs_review" in response.json()["detail"]
+
+
+def test_admin_source_trust_policy_patch_returns_not_found_for_unknown_key(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001004")
+
+    response = api_client.patch(
+        "/admin/source-trust-policy/tests:admin-not-found",
+        json={"enabled": False},
+        headers={"Authorization": "Bearer admin-token"},
+    )
+    assert response.status_code == 404
+
+
 def test_dedupe_policy_auto_merges_high_confidence_duplicate_candidate(
     api_client: TestClient,
     database_url: str,

@@ -1807,6 +1807,107 @@ class PostgresRepository:
             ),
         )
 
+    async def list_source_trust_policies(
+        self,
+        *,
+        source_key: str | None,
+        enabled: bool | None,
+        trust_level: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        pool = await self._get_pool()
+
+        normalized_source_key = self._coerce_text(source_key)
+        normalized_trust_level = self._coerce_text(trust_level)
+        if normalized_trust_level and normalized_trust_level not in SOURCE_POLICY_TRUST_LEVELS:
+            raise RepositoryValidationError(
+                "trust_level must be one of: trusted, semi_trusted, untrusted",
+            )
+
+        rows = await pool.fetch(
+            """
+            select
+              source_key,
+              trust_level::text as trust_level,
+              auto_publish,
+              requires_moderation,
+              rules_json,
+              enabled,
+              created_at,
+              updated_at
+            from source_trust_policy
+            where ($1::text is null or source_key = $1)
+              and ($2::boolean is null or enabled = $2)
+              and ($3::text is null or trust_level::text = $3)
+            order by source_key asc
+            limit $4
+            offset $5
+            """,
+            normalized_source_key,
+            enabled,
+            normalized_trust_level,
+            limit,
+            offset,
+        )
+        return [self._source_trust_policy_row_to_dict(row) for row in rows]
+
+    async def get_source_trust_policy(self, *, source_key: str) -> dict[str, Any]:
+        pool = await self._get_pool()
+
+        normalized_source_key = self._coerce_text(source_key)
+        if not normalized_source_key:
+            raise RepositoryValidationError("source_key must be a non-empty string")
+
+        row = await pool.fetchrow(
+            """
+            select
+              source_key,
+              trust_level::text as trust_level,
+              auto_publish,
+              requires_moderation,
+              rules_json,
+              enabled,
+              created_at,
+              updated_at
+            from source_trust_policy
+            where source_key = $1
+            """,
+            normalized_source_key,
+        )
+        if not row:
+            raise RepositoryNotFoundError("source trust policy not found")
+        return self._source_trust_policy_row_to_dict(row)
+
+    async def set_source_trust_policy_enabled(self, *, source_key: str, enabled: bool) -> dict[str, Any]:
+        pool = await self._get_pool()
+
+        normalized_source_key = self._coerce_text(source_key)
+        if not normalized_source_key:
+            raise RepositoryValidationError("source_key must be a non-empty string")
+
+        row = await pool.fetchrow(
+            """
+            update source_trust_policy
+            set enabled = $2
+            where source_key = $1
+            returning
+              source_key,
+              trust_level::text as trust_level,
+              auto_publish,
+              requires_moderation,
+              rules_json,
+              enabled,
+              created_at,
+              updated_at
+            """,
+            normalized_source_key,
+            bool(enabled),
+        )
+        if not row:
+            raise RepositoryNotFoundError("source trust policy not found")
+        return self._source_trust_policy_row_to_dict(row)
+
     async def list_postings(
         self,
         *,
@@ -1890,6 +1991,18 @@ class PostgresRepository:
             *params,
         )
         return [self._posting_list_row_to_dict(row) for row in rows]
+
+    def _source_trust_policy_row_to_dict(self, row: asyncpg.Record) -> dict[str, Any]:
+        return {
+            "source_key": row["source_key"],
+            "trust_level": row["trust_level"],
+            "auto_publish": bool(row["auto_publish"]),
+            "requires_moderation": bool(row["requires_moderation"]),
+            "rules_json": self._validate_source_trust_policy_rules_json(row["rules_json"], strict=False),
+            "enabled": bool(row["enabled"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
 
     async def get_posting(self, posting_id: str) -> dict[str, Any]:
         pool = await self._get_pool()

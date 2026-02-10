@@ -43,6 +43,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Expand `F2` merge-aware trust-policy routing with source-configurable merge actions/reasons/moderation routes and DB-backed integration coverage.
 - [x] Add strict repository validation + write-path enforcement for trust-policy merge-routing `rules_json` keys (allowed actions, route-label format, unknown-key rejection).
 - [x] Expand `F2` integration regressions with mixed trust + conflicting dedupe signals and invalid policy-write validation cases.
+- [x] Expose admin trust-policy management API surface (`GET/PUT/PATCH /admin/source-trust-policy`) wired to repository-validated writes with DB-backed contract tests.
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
@@ -67,6 +68,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-10: Added forced auto-merge-conflict integration coverage to validate `auto_merge_blocked` fallback routing still honors source policy overrides and moderation-route receipts.
 - 2026-02-10: Documented operator SQL runbook examples for `rules_json` merge-routing patterns, including `auto_merge_blocked` fallback/reason/route verification queries.
 - 2026-02-10: Added strict `source_trust_policy` write validation in repository (`upsert_source_trust_policy`) and moved integration upserts through this path, then added mixed-trust/conflicting-signal and invalid-rules regression tests.
+- 2026-02-10: Added admin trust-policy API endpoints for list/upsert/enable-toggle, backed by repository validation and covered with integration tests for success, authz, and invalid-rules responses.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -98,4 +100,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Implement admin policy-management endpoints that call `upsert_source_trust_policy` and expose validation failures as API contract responses.
+1. Add provenance/audit events for admin trust-policy writes and enable/disable operations.
