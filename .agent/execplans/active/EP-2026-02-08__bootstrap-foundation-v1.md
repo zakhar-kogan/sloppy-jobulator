@@ -77,6 +77,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-10: Expanded runbook with API-based trust-policy operator flow (admin `GET/PUT/PATCH`) and provenance verification query patterns to reduce SQL-only policy management.
 - 2026-02-10: Added `web/app/admin/source-trust-policy` UI and Next.js server proxy routes (`web/app/api/admin/source-trust-policy/**`) so operators can list/upsert/toggle policies against the admin API surface.
 - 2026-02-10: Added admin module/job API endpoints (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) plus `/admin/cockpit` UI and proxy routes for candidate queue actions and operator maintenance flows.
+- 2026-02-10: Added web-side API-contract tests (`node:test`) for cockpit query serialization and proxy-path builders, wired as `pnpm --dir web test:contracts`.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -108,4 +109,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Add dedicated web-side contract/component tests for cockpit behaviors and keep full moderation/admin E2E coverage under `L1`.
+1. Keep full moderation/admin E2E coverage under `L1` as the primary remaining validation gap.

@@ -1,7 +1,6 @@
 import { proxyAdminRequest } from "../../../../../lib/admin-api";
+import { buildJobsEnqueueFreshnessPath } from "../../../../../lib/admin-proxy-paths";
 
 export async function POST(request: Request) {
-  const query = new URL(request.url).searchParams.toString();
-  const path = query ? `/admin/jobs/enqueue-freshness?${query}` : "/admin/jobs/enqueue-freshness";
-  return proxyAdminRequest(path, { method: "POST" });
+  return proxyAdminRequest(buildJobsEnqueueFreshnessPath(request.url), { method: "POST" });
 }

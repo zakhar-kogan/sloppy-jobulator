@@ -7,7 +7,8 @@
 1. Added admin API surfaces for operator flows: `GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`.
 2. Added `/admin/cockpit` UI with candidate queue actions (`patch/merge/override`) and modules/jobs operator panels using Next.js server proxies.
 3. Added DB-backed integration tests for new admin module/job contracts and mutation receipts.
-4. Updated roadmap/continuity/runbook/execplan notes to reflect new `H2` baseline and next validation gap.
+4. Added web-side API-contract tests (`node:test`) for cockpit query/proxy path contracts and wired `pnpm --dir web test:contracts`.
+5. Updated roadmap/continuity/runbook/execplan notes to reflect new `H2` baseline and remaining `L1` E2E gap.
 
 ## What Went Wrong
 1. Issue: First DB-backed test run failed in sandbox with local Postgres connection denial.
@@ -43,15 +44,18 @@
   - `uv run --project api --extra dev mypy api/app`
   - `make db-up && make db-reset && (escalated) uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "admin_modules_list_and_toggle_enabled or admin_modules_requires_admin_scope or admin_jobs_visibility_and_safe_mutations or admin_jobs_requires_admin_scope" && make db-down`
   - `pnpm --dir web lint && pnpm --dir web build && pnpm --dir web typecheck`
+  - `pnpm --dir web test:contracts`
   - `bash scripts/agent-hygiene-check.sh --mode project`
 - Files changed:
   - `api/app/api/routes/admin.py`, `api/app/schemas/admin.py`, `api/app/services/repository.py`
   - `api/tests/test_discovery_jobs_integration.py`
   - `web/app/admin/cockpit/*`, `web/app/api/admin/candidates/**`, `web/app/api/admin/modules/**`, `web/app/api/admin/jobs/**`
-  - `web/lib/admin-api.ts`, `web/lib/admin-cockpit.ts`, `web/lib/admin-source-trust-policy-api.ts`
+  - `web/lib/admin-api.ts`, `web/lib/admin-cockpit.ts`, `web/lib/admin-cockpit-utils.ts`, `web/lib/admin-proxy-paths.ts`, `web/lib/admin-source-trust-policy-api.ts`
+  - `web/tests/admin-cockpit-utils.test.ts`, `web/tests/admin-proxy-paths.test.ts`, `web/package.json`, `web/tsconfig.json`
   - `.agent/CONTINUITY.md`, `.agent/RUNBOOK.md`, `.agent/execplans/active/EP-2026-02-08__bootstrap-foundation-v1.md`, `docs/roadmap/IMPLEMENTATION_PLAN_v1.2.md`
 - Tests/checks:
   - Targeted DB integration: pass (`4 passed`)
   - API lint/typecheck: pass
   - Web lint/build/typecheck: pass
+  - Web contract tests: pass (`9/9`)
   - Agent hygiene check: pass

@@ -1,7 +1,6 @@
 import { proxyAdminRequest } from "../../../../lib/admin-api";
+import { buildModulesListPath } from "../../../../lib/admin-proxy-paths";
 
 export async function GET(request: Request) {
-  const query = new URL(request.url).searchParams.toString();
-  const path = query ? `/admin/modules?${query}` : "/admin/modules";
-  return proxyAdminRequest(path, { method: "GET" });
+  return proxyAdminRequest(buildModulesListPath(request.url), { method: "GET" });
 }

@@ -4,7 +4,6 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react
 
 import {
   coerceTitle,
-  type AdminCountResult,
   type AdminJob,
   type AdminModule,
   type Candidate,
@@ -16,6 +15,7 @@ import {
   type ModuleKind,
   type PostingStatus
 } from "../../../lib/admin-cockpit";
+import { encodeAdminQuery, parseAdminCount } from "../../../lib/admin-cockpit-utils";
 
 const CANDIDATE_STATES: CandidateState[] = [
   "discovered",
@@ -39,31 +39,6 @@ type JobKindFilter = "all" | JobKind;
 type JobStatusFilter = "all" | JobStatus;
 
 type CandidateAction = "patch" | "merge" | "override";
-
-function encodeQuery(params: Record<string, string | number | boolean | null | undefined>): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null) {
-      continue;
-    }
-    if (typeof value === "string" && value.trim().length === 0) {
-      continue;
-    }
-    query.set(key, String(value));
-  }
-  return query.toString();
-}
-
-function parseCount(payload: unknown): number {
-  if (!payload || typeof payload !== "object") {
-    return 0;
-  }
-  const count = (payload as AdminCountResult).count;
-  if (typeof count === "number" && Number.isFinite(count)) {
-    return count;
-  }
-  return 0;
-}
 
 export function ModeratorCockpitClient(): JSX.Element {
   const [candidateStateFilter, setCandidateStateFilter] = useState<CandidateStateFilter>("needs_review");
@@ -110,7 +85,7 @@ export function ModeratorCockpitClient(): JSX.Element {
 
   const candidateQueryString = useMemo(
     () =>
-      encodeQuery({
+      encodeAdminQuery({
         state: candidateStateFilter === "all" ? undefined : candidateStateFilter,
         limit: candidateLimit,
         offset: candidateOffset
@@ -120,7 +95,7 @@ export function ModeratorCockpitClient(): JSX.Element {
 
   const moduleQueryString = useMemo(
     () =>
-      encodeQuery({
+      encodeAdminQuery({
         module_id: moduleIdFilter,
         kind: moduleKindFilter === "all" ? undefined : moduleKindFilter,
         enabled: moduleEnabledFilter === "all" ? undefined : moduleEnabledFilter,
@@ -132,7 +107,7 @@ export function ModeratorCockpitClient(): JSX.Element {
 
   const jobsQueryString = useMemo(
     () =>
-      encodeQuery({
+      encodeAdminQuery({
         status: jobStatusFilter === "all" ? undefined : jobStatusFilter,
         kind: jobKindFilter === "all" ? undefined : jobKindFilter,
         target_type: jobTargetTypeFilter,
@@ -359,8 +334,8 @@ export function ModeratorCockpitClient(): JSX.Element {
 
     const path =
       kind === "enqueue"
-        ? `/api/admin/jobs/enqueue-freshness?${encodeQuery({ limit: maintenanceLimit })}`
-        : `/api/admin/jobs/reap-expired?${encodeQuery({ limit: maintenanceLimit })}`;
+        ? `/api/admin/jobs/enqueue-freshness?${encodeAdminQuery({ limit: maintenanceLimit })}`
+        : `/api/admin/jobs/reap-expired?${encodeAdminQuery({ limit: maintenanceLimit })}`;
 
     try {
       const response = await fetch(path, { method: "POST" });
@@ -369,7 +344,7 @@ export function ModeratorCockpitClient(): JSX.Element {
         throw new Error(getApiErrorDetail(payload, "Failed to run jobs maintenance action."));
       }
 
-      const count = parseCount(payload);
+      const count = parseAdminCount(payload);
       setJobMessage(
         kind === "enqueue"
           ? `Enqueued ${count} freshness jobs.`

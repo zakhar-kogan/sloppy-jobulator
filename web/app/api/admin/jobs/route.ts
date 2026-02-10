@@ -1,7 +1,6 @@
 import { proxyAdminRequest } from "../../../../lib/admin-api";
+import { buildJobsListPath } from "../../../../lib/admin-proxy-paths";
 
 export async function GET(request: Request) {
-  const query = new URL(request.url).searchParams.toString();
-  const path = query ? `/admin/jobs?${query}` : "/admin/jobs";
-  return proxyAdminRequest(path, { method: "GET" });
+  return proxyAdminRequest(buildJobsListPath(request.url), { method: "GET" });
 }

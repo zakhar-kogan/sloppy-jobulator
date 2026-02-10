@@ -48,7 +48,7 @@
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, freshness enqueue/dead-letter downgrade flow, moderation authz/state/merge/override, posting lifecycle patch transitions, and admin modules/jobs contract endpoints; CI now runs DB-backed integration as a separate required job, while dedicated web cockpit contract tests and full end-to-end UI moderation tests remain pending. |
+| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, freshness enqueue/dead-letter downgrade flow, moderation authz/state/merge/override, posting lifecycle patch transitions, and admin modules/jobs contract endpoints; web API-contract tests now cover cockpit query/proxy path mapping; full end-to-end UI moderation tests remain pending. |
 | L2 | not_started | Load/perf testing not implemented. |
 | M1 | in_progress | Quality CI is split into fast and DB-backed integration required checks; full deploy + migration gate pipeline remains pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
@@ -56,7 +56,7 @@
 ## Next Implementation Steps (Priority Order)
 
 1. Continue `H2` cockpit hardening around operator ergonomics and guardrails while preserving existing API contracts.
-- Add dedicated web-side contract/component coverage for `/admin/cockpit`; keep full moderation/admin E2E under `L1`.
+- Keep full moderation/admin E2E under `L1` as the primary remaining coverage gap.
 
 ## Workstreams and Task Graph
 
