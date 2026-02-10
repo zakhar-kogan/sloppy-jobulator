@@ -1472,6 +1472,175 @@ def test_admin_source_trust_policy_patch_returns_not_found_for_unknown_key(
     assert response.status_code == 404
 
 
+def test_admin_modules_list_and_toggle_enabled(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001005")
+    auth_headers = {"Authorization": "Bearer admin-token"}
+    module_id = "admin-console-processor"
+    _run(
+        _ensure_module(
+            database_url,
+            module_id=module_id,
+            name="Admin Console Processor",
+            kind="processor",
+            enabled=True,
+            scopes=["jobs:read", "jobs:write"],
+            trust_level="trusted",
+            key_hint="admin-console-processor-key",
+            key_hash=LOCAL_CONNECTOR_KEY_HASH,
+        )
+    )
+
+    list_response = api_client.get(
+        "/admin/modules",
+        params={"module_id": module_id, "kind": "processor", "enabled": True},
+        headers=auth_headers,
+    )
+    assert list_response.status_code == 200
+    modules = list_response.json()
+    assert len(modules) == 1
+    assert modules[0]["module_id"] == module_id
+    assert modules[0]["enabled"] is True
+
+    patch_response = api_client.patch(
+        f"/admin/modules/{module_id}",
+        json={"enabled": False},
+        headers=auth_headers,
+    )
+    assert patch_response.status_code == 200
+    assert patch_response.json()["enabled"] is False
+
+    audit_actor_type = _run(
+        _fetchval(
+            database_url,
+            """
+            select actor_type
+            from provenance_events
+            where entity_type = 'module'
+              and event_type = 'module_enabled_changed'
+              and payload->>'module_id' = $1
+            order by id desc
+            limit 1
+            """,
+            module_id,
+        )
+    )
+    assert audit_actor_type == "human"
+
+
+def test_admin_modules_requires_admin_scope(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="moderator", user_id="00000000-0000-0000-0000-000000001006")
+
+    response = api_client.get(
+        "/admin/modules",
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert response.status_code == 403
+    assert "admin:write" in response.json()["detail"]
+
+
+def test_admin_jobs_visibility_and_safe_mutations(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001007")
+    auth_headers = {"Authorization": "Bearer admin-token"}
+    _, posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-admin-jobs-visibility",
+        canonical_hash="admin-jobs-visibility-hash",
+    )
+
+    enqueue_response = api_client.post(
+        "/admin/jobs/enqueue-freshness",
+        params={"limit": 10},
+        headers=auth_headers,
+    )
+    assert enqueue_response.status_code == 200
+    assert enqueue_response.json()["count"] == 1
+
+    list_response = api_client.get(
+        "/admin/jobs",
+        params={"kind": "check_freshness", "status": "queued"},
+        headers=auth_headers,
+    )
+    assert list_response.status_code == 200
+    jobs = list_response.json()
+    assert len(jobs) == 1
+    job_id = jobs[0]["id"]
+    assert jobs[0]["target_id"] == posting_id
+
+    _run(
+        _execute(
+            database_url,
+            """
+            update jobs
+            set
+              status = 'claimed',
+              lease_expires_at = now() - interval '5 minutes'
+            where id = $1::uuid
+            """,
+            job_id,
+        )
+    )
+
+    reap_response = api_client.post(
+        "/admin/jobs/reap-expired",
+        params={"limit": 10},
+        headers=auth_headers,
+    )
+    assert reap_response.status_code == 200
+    assert reap_response.json()["count"] == 1
+
+    requeued_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from jobs where id = $1::uuid",
+            job_id,
+        )
+    )
+    assert requeued_status == "queued"
+
+    lease_requeue_actor = _run(
+        _fetchval(
+            database_url,
+            """
+            select actor_type
+            from provenance_events
+            where entity_type = 'job'
+              and entity_id = $1::uuid
+              and event_type = 'lease_requeued'
+            order by id desc
+            limit 1
+            """,
+            job_id,
+        )
+    )
+    assert lease_requeue_actor == "human"
+
+
+def test_admin_jobs_requires_admin_scope(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="moderator", user_id="00000000-0000-0000-0000-000000001008")
+
+    response = api_client.get(
+        "/admin/jobs",
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert response.status_code == 403
+    assert "admin:write" in response.json()["detail"]
+
+
 def test_dedupe_policy_auto_merges_high_confidence_duplicate_candidate(
     api_client: TestClient,
     database_url: str,
@@ -2590,13 +2759,24 @@ async def _truncate_integration_tables(database_url: str) -> None:
         await conn.close()
 
 
-async def _ensure_connector_module(database_url: str, *, module_id: str, trust_level: str) -> None:
+async def _ensure_module(
+    database_url: str,
+    *,
+    module_id: str,
+    name: str,
+    kind: str,
+    enabled: bool,
+    scopes: list[str],
+    trust_level: str,
+    key_hint: str,
+    key_hash: str,
+) -> None:
     conn = await asyncpg.connect(database_url)
     try:
         await conn.execute(
             """
             insert into modules (module_id, name, kind, enabled, scopes, trust_level)
-            values ($1, $2, 'connector', true, array['discoveries:write', 'evidence:write'], $3::module_trust_level)
+            values ($1, $2, $3::module_kind, $4, $5::text[], $6::module_trust_level)
             on conflict (module_id)
             do update set
               name = excluded.name,
@@ -2606,7 +2786,10 @@ async def _ensure_connector_module(database_url: str, *, module_id: str, trust_l
               trust_level = excluded.trust_level
             """,
             module_id,
-            f"{module_id} test module",
+            name,
+            kind,
+            enabled,
+            scopes,
             trust_level,
         )
         await conn.execute(
@@ -2622,11 +2805,25 @@ async def _ensure_connector_module(database_url: str, *, module_id: str, trust_l
               revoked_at = null
             """,
             module_id,
-            module_id,
-            LOCAL_CONNECTOR_KEY_HASH,
+            key_hint,
+            key_hash,
         )
     finally:
         await conn.close()
+
+
+async def _ensure_connector_module(database_url: str, *, module_id: str, trust_level: str) -> None:
+    await _ensure_module(
+        database_url,
+        module_id=module_id,
+        name=f"{module_id} test module",
+        kind="connector",
+        enabled=True,
+        scopes=["discoveries:write", "evidence:write"],
+        trust_level=trust_level,
+        key_hint=module_id,
+        key_hash=LOCAL_CONNECTOR_KEY_HASH,
+    )
 
 
 async def _upsert_source_trust_policy(

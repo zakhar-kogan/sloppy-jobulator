@@ -11,6 +11,9 @@ export default function SourceTrustPolicyAdminPage(): JSX.Element {
         <p>
           Manage trust-policy routing against <code>/admin/source-trust-policy</code> (list, upsert, enable toggle).
         </p>
+        <Link href="/admin/cockpit" className="inline-link">
+          Open moderator cockpit
+        </Link>
         <Link href="/" className="inline-link">
           Back to catalogue
         </Link>

@@ -77,6 +77,9 @@ SOURCE_POLICY_REASON_MAP_KEYS = {"needs_review", "rejected", "auto_merged"}
 SOURCE_POLICY_ROUTE_MAP_KEYS = {"needs_review", "rejected"}
 SOURCE_POLICY_ALLOWED_ACTIONS = {"needs_review", "reject", "archive", "preserve"}
 SOURCE_POLICY_ROUTE_LABEL_RE = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
+MODULE_KINDS = {"connector", "processor"}
+JOB_KINDS = {"dedupe", "extract", "enrich", "check_freshness", "resolve_url_redirects"}
+JOB_STATUSES = {"queued", "claimed", "done", "failed", "dead_letter"}
 
 
 class PostgresRepository:
@@ -583,6 +586,40 @@ class PostgresRepository:
             raise RepositoryNotFoundError("job not found") from exc
 
     async def requeue_expired_claimed_jobs(self, module_db_id: str, limit: int) -> int:
+        return await self._requeue_expired_claimed_jobs(
+            actor_id=module_db_id,
+            actor_type="machine",
+            limit=limit,
+        )
+
+    async def enqueue_due_freshness_jobs(self, module_db_id: str, limit: int) -> int:
+        return await self._enqueue_due_freshness_jobs(
+            actor_id=module_db_id,
+            actor_type="machine",
+            limit=limit,
+        )
+
+    async def admin_requeue_expired_claimed_jobs(self, *, actor_user_id: str, limit: int) -> int:
+        normalized_actor_user_id = self._coerce_text(actor_user_id)
+        if not normalized_actor_user_id:
+            raise RepositoryValidationError("actor_user_id must be a non-empty string")
+        return await self._requeue_expired_claimed_jobs(
+            actor_id=normalized_actor_user_id,
+            actor_type="human",
+            limit=limit,
+        )
+
+    async def admin_enqueue_due_freshness_jobs(self, *, actor_user_id: str, limit: int) -> int:
+        normalized_actor_user_id = self._coerce_text(actor_user_id)
+        if not normalized_actor_user_id:
+            raise RepositoryValidationError("actor_user_id must be a non-empty string")
+        return await self._enqueue_due_freshness_jobs(
+            actor_id=normalized_actor_user_id,
+            actor_type="human",
+            limit=limit,
+        )
+
+    async def _requeue_expired_claimed_jobs(self, *, actor_id: str, actor_type: str, limit: int) -> int:
         pool = await self._get_pool()
         bounded_limit = max(1, min(limit, 1000))
 
@@ -613,6 +650,7 @@ class PostgresRepository:
                     """,
                     bounded_limit,
                 )
+
                 for row in rows:
                     await conn.execute(
                         """
@@ -624,15 +662,16 @@ class PostgresRepository:
                           actor_id,
                           payload
                         )
-                        values ('job', $1::uuid, 'lease_requeued', 'machine', $2::uuid, $3::jsonb)
+                        values ('job', $1::uuid, 'lease_requeued', $2, $3::uuid, $4::jsonb)
                         """,
                         row["id"],
-                        module_db_id,
+                        actor_type,
+                        actor_id,
                         json.dumps({"reason": "lease_expired"}),
                     )
                 return len(rows)
 
-    async def enqueue_due_freshness_jobs(self, module_db_id: str, limit: int) -> int:
+    async def _enqueue_due_freshness_jobs(self, *, actor_id: str, actor_type: str, limit: int) -> int:
         pool = await self._get_pool()
         bounded_limit = max(1, min(limit, 1000))
 
@@ -700,10 +739,11 @@ class PostgresRepository:
                           actor_id,
                           payload
                         )
-                        values ('job', $1::uuid, 'freshness_enqueued', 'machine', $2::uuid, $3::jsonb)
+                        values ('job', $1::uuid, 'freshness_enqueued', $2, $3::uuid, $4::jsonb)
                         """,
                         row["id"],
-                        module_db_id,
+                        actor_type,
+                        actor_id,
                         json.dumps(
                             {
                                 "posting_id": row["target_id"],
@@ -2050,6 +2090,182 @@ class PostgresRepository:
                     )
                 return self._source_trust_policy_row_to_dict(row)
 
+    async def list_modules(
+        self,
+        *,
+        module_id: str | None,
+        kind: str | None,
+        enabled: bool | None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        pool = await self._get_pool()
+
+        normalized_module_id = self._coerce_text(module_id)
+        normalized_kind = self._coerce_text(kind)
+        if normalized_kind and normalized_kind not in MODULE_KINDS:
+            raise RepositoryValidationError("kind must be one of: connector, processor")
+
+        rows = await pool.fetch(
+            """
+            select
+              id::text as id,
+              module_id,
+              name,
+              kind::text as kind,
+              enabled,
+              scopes,
+              trust_level::text as trust_level,
+              created_at,
+              updated_at
+            from modules
+            where ($1::text is null or module_id = $1)
+              and ($2::text is null or kind::text = $2)
+              and ($3::boolean is null or enabled = $3)
+            order by updated_at desc, module_id asc
+            limit $4
+            offset $5
+            """,
+            normalized_module_id,
+            normalized_kind,
+            enabled,
+            limit,
+            offset,
+        )
+        return [self._module_row_to_dict(row) for row in rows]
+
+    async def set_module_enabled(
+        self,
+        *,
+        module_id: str,
+        enabled: bool,
+        actor_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        pool = await self._get_pool()
+
+        normalized_module_id = self._coerce_text(module_id)
+        if not normalized_module_id:
+            raise RepositoryValidationError("module_id must be a non-empty string")
+        normalized_actor_user_id = self._coerce_text(actor_user_id)
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                previous_row = await conn.fetchrow(
+                    """
+                    select
+                      id::text as id,
+                      module_id,
+                      enabled
+                    from modules
+                    where module_id = $1
+                    for update
+                    """,
+                    normalized_module_id,
+                )
+                if not previous_row:
+                    raise RepositoryNotFoundError("module not found")
+
+                row = await conn.fetchrow(
+                    """
+                    update modules
+                    set enabled = $2
+                    where module_id = $1
+                    returning
+                      id::text as id,
+                      module_id,
+                      name,
+                      kind::text as kind,
+                      enabled,
+                      scopes,
+                      trust_level::text as trust_level,
+                      created_at,
+                      updated_at
+                    """,
+                    normalized_module_id,
+                    bool(enabled),
+                )
+                if not row:
+                    raise RepositoryNotFoundError("module not found")
+
+                if normalized_actor_user_id:
+                    await conn.execute(
+                        """
+                        insert into provenance_events (
+                          entity_type,
+                          entity_id,
+                          event_type,
+                          actor_type,
+                          actor_id,
+                          payload
+                        )
+                        values ('module', $1::uuid, 'module_enabled_changed', 'human', $2::uuid, $3::jsonb)
+                        """,
+                        row["id"],
+                        normalized_actor_user_id,
+                        json.dumps(
+                            {
+                                "module_id": row["module_id"],
+                                "previous_enabled": bool(previous_row["enabled"]),
+                                "enabled": bool(row["enabled"]),
+                            }
+                        ),
+                    )
+
+                return self._module_row_to_dict(row)
+
+    async def list_admin_jobs(
+        self,
+        *,
+        status: str | None,
+        kind: str | None,
+        target_type: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        pool = await self._get_pool()
+
+        normalized_status = self._coerce_text(status)
+        if normalized_status and normalized_status not in JOB_STATUSES:
+            raise RepositoryValidationError("status must be one of: queued, claimed, done, failed, dead_letter")
+
+        normalized_kind = self._coerce_text(kind)
+        if normalized_kind and normalized_kind not in JOB_KINDS:
+            raise RepositoryValidationError(
+                "kind must be one of: dedupe, extract, enrich, check_freshness, resolve_url_redirects",
+            )
+
+        normalized_target_type = self._coerce_text(target_type)
+
+        rows = await pool.fetch(
+            """
+            select
+              id::text as id,
+              kind::text as kind,
+              target_type,
+              target_id::text as target_id,
+              status::text as status,
+              attempt,
+              locked_by_module_id::text as locked_by_module_id,
+              lease_expires_at,
+              next_run_at,
+              created_at,
+              updated_at
+            from jobs
+            where ($1::text is null or status::text = $1)
+              and ($2::text is null or kind::text = $2)
+              and ($3::text is null or target_type = $3)
+            order by updated_at desc, id desc
+            limit $4
+            offset $5
+            """,
+            normalized_status,
+            normalized_kind,
+            normalized_target_type,
+            limit,
+            offset,
+        )
+        return [self._admin_job_row_to_dict(row) for row in rows]
+
     async def list_postings(
         self,
         *,
@@ -2142,6 +2358,36 @@ class PostgresRepository:
             "requires_moderation": bool(row["requires_moderation"]),
             "rules_json": self._validate_source_trust_policy_rules_json(row["rules_json"], strict=False),
             "enabled": bool(row["enabled"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    @staticmethod
+    def _module_row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "module_id": row["module_id"],
+            "name": row["name"],
+            "kind": row["kind"],
+            "enabled": bool(row["enabled"]),
+            "scopes": list(row["scopes"] or []),
+            "trust_level": row["trust_level"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    @staticmethod
+    def _admin_job_row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "kind": row["kind"],
+            "target_type": row["target_type"],
+            "target_id": row["target_id"],
+            "status": row["status"],
+            "attempt": int(row["attempt"]),
+            "locked_by_module_id": row["locked_by_module_id"],
+            "lease_expires_at": row["lease_expires_at"],
+            "next_run_at": row["next_run_at"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }

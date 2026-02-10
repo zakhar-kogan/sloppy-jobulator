@@ -4,6 +4,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 ModuleTrustLevel = Literal["trusted", "semi_trusted", "untrusted"]
+ModuleKind = Literal["connector", "processor"]
+JobKind = Literal["dedupe", "extract", "enrich", "check_freshness", "resolve_url_redirects"]
+JobStatus = Literal["queued", "claimed", "done", "failed", "dead_letter"]
 
 
 class SourceTrustPolicyOut(BaseModel):
@@ -27,3 +30,37 @@ class SourceTrustPolicyUpsertRequest(BaseModel):
 
 class SourceTrustPolicyEnabledPatchRequest(BaseModel):
     enabled: bool
+
+
+class ModuleOut(BaseModel):
+    id: str
+    module_id: str
+    name: str
+    kind: ModuleKind
+    enabled: bool
+    scopes: list[str] = Field(default_factory=list)
+    trust_level: ModuleTrustLevel
+    created_at: datetime
+    updated_at: datetime
+
+
+class ModuleEnabledPatchRequest(BaseModel):
+    enabled: bool
+
+
+class AdminJobOut(BaseModel):
+    id: str
+    kind: JobKind
+    target_type: str
+    target_id: str | None = None
+    status: JobStatus
+    attempt: int
+    locked_by_module_id: str | None = None
+    lease_expires_at: datetime | None = None
+    next_run_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminJobsMaintenanceOut(BaseModel):
+    count: int

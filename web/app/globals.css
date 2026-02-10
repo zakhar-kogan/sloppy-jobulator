@@ -138,6 +138,13 @@ main {
   font-size: 1.1rem;
 }
 
+.small-heading {
+  margin: 0.55rem 0 0.1rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
 .panel-wide {
   grid-column: 1 / -1;
 }
@@ -244,6 +251,11 @@ main {
   font-size: 0.8rem;
   letter-spacing: 0.02em;
   color: var(--muted);
+}
+
+.policy-table code {
+  font-size: 0.78rem;
+  color: #274438;
 }
 
 .row-actions {

@@ -27,6 +27,11 @@ export default function HomePage() {
             Open source trust policy admin
           </Link>
         </p>
+        <p>
+          <Link className="inline-link" href="/admin/cockpit">
+            Open moderator cockpit
+          </Link>
+        </p>
 
         <div className="controls">
           <div className="control">

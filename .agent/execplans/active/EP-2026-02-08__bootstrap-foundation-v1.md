@@ -47,6 +47,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Emit provenance audit events for admin trust-policy writes/toggles and assert them in DB-backed integration tests.
 - [x] Add runbook API-first operator guidance for trust-policy management and audit verification (`curl` + SQL receipts).
 - [x] Wire admin UI (`H2`) trust-policy management flows to `GET/PUT/PATCH /admin/source-trust-policy` via Next.js proxy routes.
+- [x] Expand `H2` with operator cockpit baseline (`/admin/cockpit`) for candidate queue actions (`approve/reject/merge/override`) plus module/job visibility and bounded maintenance mutations via new admin API surfaces.
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
@@ -75,6 +76,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-10: Added provenance event writes for admin trust-policy upsert/enable changes and extended admin integration tests to assert emitted audit payloads/actor attribution.
 - 2026-02-10: Expanded runbook with API-based trust-policy operator flow (admin `GET/PUT/PATCH`) and provenance verification query patterns to reduce SQL-only policy management.
 - 2026-02-10: Added `web/app/admin/source-trust-policy` UI and Next.js server proxy routes (`web/app/api/admin/source-trust-policy/**`) so operators can list/upsert/toggle policies against the admin API surface.
+- 2026-02-10: Added admin module/job API endpoints (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) plus `/admin/cockpit` UI and proxy routes for candidate queue actions and operator maintenance flows.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -106,4 +108,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Continue `H2` beyond trust-policy management (moderation queue/merge/modules/jobs surfaces) while reusing the server-side admin API proxy pattern.
+1. Add dedicated web-side contract/component tests for cockpit behaviors and keep full moderation/admin E2E coverage under `L1`.

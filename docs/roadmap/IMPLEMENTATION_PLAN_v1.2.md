@@ -38,7 +38,7 @@
 | G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
 | G2 | done | Freshness scheduler endpoint + worker cadence now enqueue `check_freshness` jobs; result/dead-letter paths apply deterministic posting downgrade/archive transitions with provenance and integration coverage. |
 | H1 | in_progress | Minimal Next.js public shell exists; full catalogue UX pending. |
-| H2 | in_progress | Admin trust-policy console is wired to `GET/PUT/PATCH /admin/source-trust-policy` (list/upsert/enable toggle) via Next.js proxy routes; broader moderator cockpit flows remain pending. |
+| H2 | in_progress | Admin trust-policy console is wired to `GET/PUT/PATCH /admin/source-trust-policy`, and `/admin/cockpit` now covers candidate queue actions (`PATCH /candidates`, `POST /candidates/{id}/merge`, `POST /candidates/{id}/override`) plus modules/jobs operator flows (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) via Next.js proxy routes; UX hardening remains pending. |
 | I1 | not_started | TaskRouter abstraction not implemented. |
 | I2 | not_started | LiteLLM adapter not implemented. |
 | J1 | not_started | OTel instrumentation not implemented. |
@@ -48,15 +48,15 @@
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, freshness enqueue/dead-letter downgrade flow, moderation authz/state/merge/override, and posting lifecycle patch transitions; CI now runs DB-backed integration as a separate required job, while end-to-end UI moderation tests remain pending. |
+| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, freshness enqueue/dead-letter downgrade flow, moderation authz/state/merge/override, posting lifecycle patch transitions, and admin modules/jobs contract endpoints; CI now runs DB-backed integration as a separate required job, while dedicated web cockpit contract tests and full end-to-end UI moderation tests remain pending. |
 | L2 | not_started | Load/perf testing not implemented. |
 | M1 | in_progress | Quality CI is split into fast and DB-backed integration required checks; full deploy + migration gate pipeline remains pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
 
 ## Next Implementation Steps (Priority Order)
 
-1. Continue `F2` trust-policy automation hardening around operator ergonomics and policy management surfaces.
-- Expand `H2` beyond trust-policy management to moderation queues/merge tooling/modules/jobs while reusing the server-side admin API proxy pattern.
+1. Continue `H2` cockpit hardening around operator ergonomics and guardrails while preserving existing API contracts.
+- Add dedicated web-side contract/component coverage for `/admin/cockpit`; keep full moderation/admin E2E under `L1`.
 
 ## Workstreams and Task Graph
 

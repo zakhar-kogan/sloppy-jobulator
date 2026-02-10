@@ -223,6 +223,13 @@ limit 20;
 13. Web admin console path:
 - URL: `/admin/source-trust-policy` in the Next.js app.
 - The page calls Next.js proxy routes (`/api/admin/source-trust-policy` and `/api/admin/source-trust-policy/{sourceKey}`), which require `SJ_API_URL` and `SJ_ADMIN_BEARER` env vars on the web server process.
+14. Operator cockpit API endpoints:
+- Candidate queue/actions: `GET /candidates`, `PATCH /candidates/{candidateId}`, `POST /candidates/{candidateId}/merge`, `POST /candidates/{candidateId}/override` (requires `moderation:read|write`; admin tokens include these scopes).
+- Modules visibility/mutation: `GET /admin/modules`, `PATCH /admin/modules/{moduleId}` (supports safe `enabled` toggle).
+- Jobs visibility/maintenance: `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness` (bounded by `limit` query param).
+15. Operator cockpit web path:
+- URL: `/admin/cockpit` in the Next.js app.
+- Server proxy routes: `/api/admin/candidates/**`, `/api/admin/modules/**`, `/api/admin/jobs/**` forwarding to API with `SJ_ADMIN_BEARER`.
 
 ## Incident basics
 1. Health check endpoint/command: `GET /healthz` on API.
