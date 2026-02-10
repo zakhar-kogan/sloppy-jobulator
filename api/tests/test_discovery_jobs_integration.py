@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 import app.core.security as security
 from app.core.config import get_settings
 from app.main import app
-from app.services.repository import get_repository
+from app.services.repository import PostgresRepository, RepositoryConflictError, get_repository
 
 CONNECTOR_HEADERS = {
     "X-Module-Id": "local-connector",
@@ -1817,6 +1817,129 @@ def test_trust_policy_can_override_rejected_merge_route_for_source(
     assert posting_status == "archived"
     assert trust_policy_reason == "policy_merge_rejected_review"
     assert moderation_route == "dedupe.source_risk_review"
+
+
+def test_trust_policy_override_applies_when_auto_merge_fallbacks_to_needs_review(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _run(
+        _upsert_source_trust_policy(
+            database_url,
+            source_key="tests:auto-merge-blocked",
+            trust_level="trusted",
+            auto_publish=True,
+            requires_moderation=False,
+            rules_json={
+                "min_confidence": 0.0,
+                "merge_decision_actions": {"needs_review": "reject"},
+                "merge_decision_reasons": {"needs_review": "policy_auto_merge_blocked_requires_reject"},
+                "moderation_routes": {"needs_review": "dedupe.auto_merge_conflict_queue"},
+            },
+        )
+    )
+
+    async def _raise_auto_merge_conflict(*_: Any, **__: Any) -> dict[str, Any]:
+        raise RepositoryConflictError("forced auto merge conflict")
+
+    monkeypatch.setattr(PostgresRepository, "_apply_candidate_merge", _raise_auto_merge_conflict)
+
+    primary_candidate_id, _ = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-auto-merge-blocked-primary",
+        canonical_hash="auto-merge-blocked-hash",
+    )
+    secondary_candidate_id, secondary_posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-auto-merge-blocked-secondary",
+        canonical_hash="auto-merge-blocked-hash",
+        source_key="tests:auto-merge-blocked",
+    )
+
+    merge_decision = _run(
+        _fetchval(
+            database_url,
+            """
+            select decision::text
+            from candidate_merge_decisions
+            where primary_candidate_id = $1::uuid
+              and secondary_candidate_id = $2::uuid
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+        )
+    )
+    merge_metadata = _run(
+        _fetchval(
+            database_url,
+            """
+            select metadata
+            from candidate_merge_decisions
+            where primary_candidate_id = $1::uuid
+              and secondary_candidate_id = $2::uuid
+            """,
+            primary_candidate_id,
+            secondary_candidate_id,
+        )
+    )
+    secondary_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            secondary_candidate_id,
+        )
+    )
+    posting_status = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            secondary_posting_id,
+        )
+    )
+    trust_policy_reason = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'reason'
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'trust_policy_applied'
+            order by id desc
+            limit 1
+            """,
+            secondary_candidate_id,
+        )
+    )
+    moderation_route = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'moderation_route'
+            from provenance_events
+            where entity_type = 'posting_candidate'
+              and entity_id = $1::uuid
+              and event_type = 'trust_policy_applied'
+            order by id desc
+            limit 1
+            """,
+            secondary_candidate_id,
+        )
+    )
+
+    if isinstance(merge_metadata, str):
+        merge_metadata = json.loads(merge_metadata)
+
+    assert merge_decision == "needs_review"
+    assert isinstance(merge_metadata, dict)
+    assert bool(merge_metadata.get("auto_merge_blocked")) is True
+    assert secondary_state == "rejected"
+    assert posting_status == "archived"
+    assert trust_policy_reason == "policy_auto_merge_blocked_requires_reject"
+    assert moderation_route == "dedupe.auto_merge_conflict_queue"
 
 
 def _configure_mock_human_auth(monkeypatch: pytest.MonkeyPatch, *, role: str, user_id: str) -> None:

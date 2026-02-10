@@ -25,7 +25,7 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[CODE]` Added auto-merge short-circuit to keep canonical posting ownership stable while archiving secondary candidates and retaining discovery/evidence links on the primary.
 - 2026-02-10 `[CODE]` Added review-routing override so uncertain/conflicting dedupe outcomes force moderation queue state even when trust-policy would otherwise auto-publish.
 - 2026-02-10 `[CODE]` Expanded `source_trust_policy` merge routing to apply policy-configurable `merge_decision_actions`/`merge_decision_reasons`/`moderation_routes` and default `rejected` handling.
-- 2026-02-10 `[CODE]` Added DB-backed integration coverage for source-specific overrides on dedupe `needs_review` and `rejected` outcomes.
+- 2026-02-10 `[CODE]` Added DB-backed integration coverage for source-specific overrides on dedupe `needs_review`/`rejected` outcomes, including forced `auto_merge_blocked` fallback routing.
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
@@ -53,3 +53,5 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/app/services/repository.py api/tests/test_discovery_jobs_integration.py` and `uv run --project api --extra dev mypy api/app/services/repository.py` passed.
 - 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> (escalated) SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "override_needs_review_merge_route_for_source or override_rejected_merge_route_for_source" -> (escalated) ... -k "dedupe_policy or trust_policy" -> make db-down` passed (`2/2` selected, then `8/8` selected).
 - 2026-02-10 `[TOOL]` `make lint` and `make typecheck` failed on host (`ruff`/`mypy` missing in PATH); equivalent `uv run --project api --extra dev` checks passed for touched API files.
+- 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/tests/test_discovery_jobs_integration.py` passed after fallback test addition.
+- 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> (escalated) SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "auto_merge_fallbacks_to_needs_review" -> (escalated) ... -k "dedupe_policy or trust_policy or auto_merge_fallbacks_to_needs_review" -> make db-down` passed (`1/1` selected, then `9/9` selected).

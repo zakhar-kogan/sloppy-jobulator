@@ -62,6 +62,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-09: Replaced placeholder admin bootstrap script with deterministic role/provenance SQL generation (`--user-id|--email`, `--role`) and documented invocation in README/runbook.
 - 2026-02-10: Added `E3` dedupe scorer module and integrated `E4` machine routing so extract projection now performs precision-first auto-merge/review/reject decisions with audited `candidate_merge_decisions` + provenance.
 - 2026-02-10: Extended `F2` trust-policy handling to consume final merge decisions (`needs_review`, `rejected`, `auto_merged`) with `rules_json` overrides (`merge_decision_actions`, `merge_decision_reasons`, `moderation_routes`) and source-specific integration tests.
+- 2026-02-10: Added forced auto-merge-conflict integration coverage to validate `auto_merge_blocked` fallback routing still honors source policy overrides and moderation-route receipts.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -94,4 +95,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
 1. Expose/document `source_trust_policy.rules_json` merge-routing keys in operator-facing workflows and admin surfaces.
-2. Extend `F2` integration coverage for auto-merge-blocked fallback routing under source-policy overrides.
+2. Add operator-facing examples for fallback-specific merge routing (`auto_merge_blocked`) in runbook docs.

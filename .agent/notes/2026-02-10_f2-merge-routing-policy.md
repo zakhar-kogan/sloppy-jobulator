@@ -10,7 +10,8 @@
 2. Added policy override support in `source_trust_policy.rules_json` for `merge_decision_actions`, `merge_decision_reasons`, and `moderation_routes`.
 3. Ensured final candidate state is persisted after merge routing decisions, including fallback paths after blocked auto-merge attempts.
 4. Added DB-backed integration tests for source-specific override behavior on dedupe `needs_review` and `rejected` outcomes.
-5. Updated roadmap and agent continuity/execplan state for project-mode capture.
+5. Added DB-backed integration coverage for forced `auto_merge_blocked` fallback path to verify source-policy override behavior survives auto-merge conflict fallback.
+6. Updated roadmap and agent continuity/execplan state for project-mode capture.
 
 ## What Went Wrong
 1. Issue: Initial DB-backed test attempt failed inside sandbox.
@@ -44,6 +45,6 @@
 - Why: helper already exists (`H-2026-02-10__db-integration-escalation`), so no new promotion needed.
 
 ## Receipts
-- Commands run: `uv run --project api --extra dev ruff check api/app/services/repository.py api/tests/test_discovery_jobs_integration.py`; `uv run --project api --extra dev mypy api/app/services/repository.py`; `make db-up`; `make db-reset`; escalated `uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "override_needs_review_merge_route_for_source or override_rejected_merge_route_for_source"`; escalated `... -k "dedupe_policy or trust_policy"`; `make db-down`; `make lint`; `make typecheck`.
-- Files changed: `api/app/services/repository.py`, `api/tests/test_discovery_jobs_integration.py`, `docs/roadmap/IMPLEMENTATION_PLAN_v1.2.md`, `.agent/CONTINUITY.md`, `.agent/execplans/active/EP-2026-02-08__bootstrap-foundation-v1.md`, `.agent/execplans/INDEX.md`, `.agent/notes/2026-02-10_f2-merge-routing-policy.md`.
-- Tests/checks: targeted lint/typecheck passed via `uv`; new integration tests passed (`2/2` selected); broader dedupe/trust integration subset passed (`8/8` selected); `make lint` and `make typecheck` failed due missing host `ruff`/`mypy`.
+- Commands run: `uv run --project api --extra dev ruff check api/app/services/repository.py api/tests/test_discovery_jobs_integration.py`; `uv run --project api --extra dev mypy api/app/services/repository.py`; `make db-up`; `make db-reset`; escalated `uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "override_needs_review_merge_route_for_source or override_rejected_merge_route_for_source"`; escalated `... -k "dedupe_policy or trust_policy"`; `uv run --project api --extra dev ruff check api/tests/test_discovery_jobs_integration.py`; escalated `... -k "auto_merge_fallbacks_to_needs_review"`; escalated `... -k "dedupe_policy or trust_policy or auto_merge_fallbacks_to_needs_review"`; `make db-down`; `make lint`; `make typecheck`.
+- Files changed: `api/app/services/repository.py`, `api/tests/test_discovery_jobs_integration.py`, `docs/roadmap/IMPLEMENTATION_PLAN_v1.2.md`, `.agent/CONTINUITY.md`, `.agent/execplans/active/EP-2026-02-08__bootstrap-foundation-v1.md`, `.agent/execplans/INDEX.md`, `.agent/PATTERNS.md`, `.agent/notes/2026-02-10_f2-merge-routing-policy.md`.
+- Tests/checks: targeted lint/typecheck passed via `uv`; integration tests for source overrides passed (`2/2` selected); fallback test passed (`1/1` selected); broader dedupe/trust subset passed (`9/9` selected); `make lint` and `make typecheck` failed due missing host `ruff`/`mypy`.
