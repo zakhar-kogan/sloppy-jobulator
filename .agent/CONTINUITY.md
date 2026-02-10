@@ -14,16 +14,16 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `F2` admin policy-management API surface is live (`GET/PUT/PATCH /admin/source-trust-policy`) and uses repository-enforced merge-routing validation with DB-backed contract tests.
-Next: Add provenance/audit events for admin trust-policy policy writes/toggles and wire admin UI (`H2`) to the new endpoints.
+Now: `F2` admin policy-management API surface now emits provenance audit events for trust-policy upserts and enable toggles (`policy_upserted`, `policy_enabled_changed`) with actor attribution.
+Next: Wire admin UI (`H2`) to `GET/PUT/PATCH /admin/source-trust-policy` and add operator runbook snippets for API-driven policy management/audit verification.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
 - 2026-02-10 `[CODE]` Added strict repository validation for `source_trust_policy.rules_json` merge-routing contracts (top-level key whitelist, decision-map unknown-key rejection, action whitelist, route-label format checks).
-- 2026-02-10 `[CODE]` Added repository write API `upsert_source_trust_policy(...)` and enforced strict validation before DB persistence.
 - 2026-02-10 `[CODE]` Added admin policy-management endpoints (`GET/PUT/PATCH /admin/source-trust-policy`) with `admin:write` scope enforcement and repository-backed list/upsert/enable-toggle behavior.
-- 2026-02-10 `[CODE]` Added integration API coverage for admin trust-policy CRUD/filter/authz and invalid-rules contract failures.
-- 2026-02-10 `[CODE]` Updated roadmap `F2` notes and task graph to reflect shipped admin policy APIs and new follow-up focus (audit events + H2 wiring).
+- 2026-02-10 `[CODE]` Added provenance audit writes for admin trust-policy operations (`policy_upserted`, `policy_enabled_changed`) with actor attribution and prior/new enabled state payloads.
+- 2026-02-10 `[CODE]` Expanded integration API coverage to assert admin trust-policy audit events plus CRUD/filter/authz and invalid-rules contract failures.
+- 2026-02-10 `[CODE]` Updated roadmap `F2` notes/task graph to reflect shipped admin APIs plus audit events and revised follow-ups (`H2` wiring + runbook API snippets).
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.

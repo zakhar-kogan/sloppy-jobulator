@@ -146,6 +146,7 @@ class PostgresRepository:
         requires_moderation: bool,
         rules_json: dict[str, Any],
         enabled: bool = True,
+        actor_user_id: str | None = None,
     ) -> SourceTrustPolicyRecord:
         normalized_source_key = self._coerce_text(source_key)
         if not normalized_source_key:
@@ -158,50 +159,126 @@ class PostgresRepository:
             )
 
         normalized_rules_json = self._validate_source_trust_policy_rules_json(rules_json, strict=True)
+        normalized_actor_user_id = self._coerce_text(actor_user_id)
         pool = await self._get_pool()
-        row = await pool.fetchrow(
-            """
-            insert into source_trust_policy (
-              source_key,
-              trust_level,
-              auto_publish,
-              requires_moderation,
-              rules_json,
-              enabled
-            )
-            values ($1, $2::module_trust_level, $3, $4, $5::jsonb, $6)
-            on conflict (source_key)
-            do update set
-              trust_level = excluded.trust_level,
-              auto_publish = excluded.auto_publish,
-              requires_moderation = excluded.requires_moderation,
-              rules_json = excluded.rules_json,
-              enabled = excluded.enabled
-            returning
-              source_key,
-              trust_level::text as trust_level,
-              auto_publish,
-              requires_moderation,
-              rules_json
-            """,
-            normalized_source_key,
-            normalized_trust_level,
-            bool(auto_publish),
-            bool(requires_moderation),
-            json.dumps(normalized_rules_json),
-            bool(enabled),
-        )
-        if not row:
-            raise RepositoryConflictError("failed to upsert source trust policy")
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                existing_row = await conn.fetchrow(
+                    """
+                    select
+                      id::text as id,
+                      source_key,
+                      trust_level::text as trust_level,
+                      auto_publish,
+                      requires_moderation,
+                      rules_json,
+                      enabled
+                    from source_trust_policy
+                    where source_key = $1
+                    for update
+                    """,
+                    normalized_source_key,
+                )
+                if existing_row:
+                    row = await conn.fetchrow(
+                        """
+                        update source_trust_policy
+                        set
+                          trust_level = $2::module_trust_level,
+                          auto_publish = $3,
+                          requires_moderation = $4,
+                          rules_json = $5::jsonb,
+                          enabled = $6
+                        where source_key = $1
+                        returning
+                          id::text as id,
+                          source_key,
+                          trust_level::text as trust_level,
+                          auto_publish,
+                          requires_moderation,
+                          rules_json,
+                          enabled
+                        """,
+                        normalized_source_key,
+                        normalized_trust_level,
+                        bool(auto_publish),
+                        bool(requires_moderation),
+                        json.dumps(normalized_rules_json),
+                        bool(enabled),
+                    )
+                    operation = "updated"
+                else:
+                    row = await conn.fetchrow(
+                        """
+                        insert into source_trust_policy (
+                          source_key,
+                          trust_level,
+                          auto_publish,
+                          requires_moderation,
+                          rules_json,
+                          enabled
+                        )
+                        values ($1, $2::module_trust_level, $3, $4, $5::jsonb, $6)
+                        returning
+                          id::text as id,
+                          source_key,
+                          trust_level::text as trust_level,
+                          auto_publish,
+                          requires_moderation,
+                          rules_json,
+                          enabled
+                        """,
+                        normalized_source_key,
+                        normalized_trust_level,
+                        bool(auto_publish),
+                        bool(requires_moderation),
+                        json.dumps(normalized_rules_json),
+                        bool(enabled),
+                    )
+                    operation = "created"
 
-        return SourceTrustPolicyRecord(
-            source_key=row["source_key"],
-            trust_level=row["trust_level"],
-            auto_publish=bool(row["auto_publish"]),
-            requires_moderation=bool(row["requires_moderation"]),
-            rules_json=self._validate_source_trust_policy_rules_json(row["rules_json"], strict=False),
-            matched_fallback=False,
-        )
+                if not row:
+                    raise RepositoryConflictError("failed to upsert source trust policy")
+
+                normalized_row_rules = self._validate_source_trust_policy_rules_json(row["rules_json"], strict=False)
+                if normalized_actor_user_id:
+                    previous_payload: dict[str, Any] | None = None
+                    if existing_row:
+                        previous_payload = {
+                            "trust_level": existing_row["trust_level"],
+                            "auto_publish": bool(existing_row["auto_publish"]),
+                            "requires_moderation": bool(existing_row["requires_moderation"]),
+                            "enabled": bool(existing_row["enabled"]),
+                            "rules_json": self._validate_source_trust_policy_rules_json(
+                                existing_row["rules_json"],
+                                strict=False,
+                            ),
+                        }
+                    await self._record_source_trust_policy_event(
+                        conn=conn,
+                        policy_id=row["id"],
+                        event_type="policy_upserted",
+                        actor_user_id=normalized_actor_user_id,
+                        payload={
+                            "source_key": row["source_key"],
+                            "operation": operation,
+                            "trust_level": row["trust_level"],
+                            "auto_publish": bool(row["auto_publish"]),
+                            "requires_moderation": bool(row["requires_moderation"]),
+                            "enabled": bool(row["enabled"]),
+                            "rules_json": normalized_row_rules,
+                            "previous": previous_payload,
+                        },
+                    )
+
+                return SourceTrustPolicyRecord(
+                    source_key=row["source_key"],
+                    trust_level=row["trust_level"],
+                    auto_publish=bool(row["auto_publish"]),
+                    requires_moderation=bool(row["requires_moderation"]),
+                    rules_json=normalized_row_rules,
+                    matched_fallback=False,
+                )
 
     async def create_discovery_and_enqueue_extract(
         self,
@@ -1807,6 +1884,33 @@ class PostgresRepository:
             ),
         )
 
+    async def _record_source_trust_policy_event(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        policy_id: str,
+        event_type: str,
+        actor_user_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        await conn.execute(
+            """
+            insert into provenance_events (
+              entity_type,
+              entity_id,
+              event_type,
+              actor_type,
+              actor_id,
+              payload
+            )
+            values ('source_trust_policy', $1::uuid, $2, 'human', $3::uuid, $4::jsonb)
+            """,
+            policy_id,
+            event_type,
+            actor_user_id,
+            json.dumps(payload),
+        )
+
     async def list_source_trust_policies(
         self,
         *,
@@ -1879,34 +1983,72 @@ class PostgresRepository:
             raise RepositoryNotFoundError("source trust policy not found")
         return self._source_trust_policy_row_to_dict(row)
 
-    async def set_source_trust_policy_enabled(self, *, source_key: str, enabled: bool) -> dict[str, Any]:
+    async def set_source_trust_policy_enabled(
+        self,
+        *,
+        source_key: str,
+        enabled: bool,
+        actor_user_id: str | None = None,
+    ) -> dict[str, Any]:
         pool = await self._get_pool()
 
         normalized_source_key = self._coerce_text(source_key)
         if not normalized_source_key:
             raise RepositoryValidationError("source_key must be a non-empty string")
+        normalized_actor_user_id = self._coerce_text(actor_user_id)
 
-        row = await pool.fetchrow(
-            """
-            update source_trust_policy
-            set enabled = $2
-            where source_key = $1
-            returning
-              source_key,
-              trust_level::text as trust_level,
-              auto_publish,
-              requires_moderation,
-              rules_json,
-              enabled,
-              created_at,
-              updated_at
-            """,
-            normalized_source_key,
-            bool(enabled),
-        )
-        if not row:
-            raise RepositoryNotFoundError("source trust policy not found")
-        return self._source_trust_policy_row_to_dict(row)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                previous_row = await conn.fetchrow(
+                    """
+                    select
+                      id::text as id,
+                      source_key,
+                      enabled
+                    from source_trust_policy
+                    where source_key = $1
+                    for update
+                    """,
+                    normalized_source_key,
+                )
+                if not previous_row:
+                    raise RepositoryNotFoundError("source trust policy not found")
+
+                row = await conn.fetchrow(
+                    """
+                    update source_trust_policy
+                    set enabled = $2
+                    where source_key = $1
+                    returning
+                      id::text as id,
+                      source_key,
+                      trust_level::text as trust_level,
+                      auto_publish,
+                      requires_moderation,
+                      rules_json,
+                      enabled,
+                      created_at,
+                      updated_at
+                    """,
+                    normalized_source_key,
+                    bool(enabled),
+                )
+                if not row:
+                    raise RepositoryNotFoundError("source trust policy not found")
+
+                if normalized_actor_user_id:
+                    await self._record_source_trust_policy_event(
+                        conn=conn,
+                        policy_id=row["id"],
+                        event_type="policy_enabled_changed",
+                        actor_user_id=normalized_actor_user_id,
+                        payload={
+                            "source_key": row["source_key"],
+                            "previous_enabled": bool(previous_row["enabled"]),
+                            "enabled": bool(row["enabled"]),
+                        },
+                    )
+                return self._source_trust_policy_row_to_dict(row)
 
     async def list_postings(
         self,

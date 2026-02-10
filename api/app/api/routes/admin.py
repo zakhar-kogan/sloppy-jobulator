@@ -60,6 +60,9 @@ async def put_source_trust_policy(
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
+    if not principal.actor_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid human principal")
+
     try:
         await repository.upsert_source_trust_policy(
             source_key=source_key,
@@ -68,6 +71,7 @@ async def put_source_trust_policy(
             requires_moderation=payload.requires_moderation,
             rules_json=payload.rules_json,
             enabled=payload.enabled,
+            actor_user_id=principal.actor_id,
         )
         row = await repository.get_source_trust_policy(source_key=source_key)
     except RepositoryValidationError as exc:
@@ -92,8 +96,15 @@ async def patch_source_trust_policy_enabled(
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
+    if not principal.actor_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid human principal")
+
     try:
-        row = await repository.set_source_trust_policy_enabled(source_key=source_key, enabled=payload.enabled)
+        row = await repository.set_source_trust_policy_enabled(
+            source_key=source_key,
+            enabled=payload.enabled,
+            actor_user_id=principal.actor_id,
+        )
     except RepositoryValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     except RepositoryUnavailableError as exc:

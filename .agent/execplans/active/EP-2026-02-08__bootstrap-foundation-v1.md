@@ -44,6 +44,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Add strict repository validation + write-path enforcement for trust-policy merge-routing `rules_json` keys (allowed actions, route-label format, unknown-key rejection).
 - [x] Expand `F2` integration regressions with mixed trust + conflicting dedupe signals and invalid policy-write validation cases.
 - [x] Expose admin trust-policy management API surface (`GET/PUT/PATCH /admin/source-trust-policy`) wired to repository-validated writes with DB-backed contract tests.
+- [x] Emit provenance audit events for admin trust-policy writes/toggles and assert them in DB-backed integration tests.
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
@@ -69,6 +70,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-10: Documented operator SQL runbook examples for `rules_json` merge-routing patterns, including `auto_merge_blocked` fallback/reason/route verification queries.
 - 2026-02-10: Added strict `source_trust_policy` write validation in repository (`upsert_source_trust_policy`) and moved integration upserts through this path, then added mixed-trust/conflicting-signal and invalid-rules regression tests.
 - 2026-02-10: Added admin trust-policy API endpoints for list/upsert/enable-toggle, backed by repository validation and covered with integration tests for success, authz, and invalid-rules responses.
+- 2026-02-10: Added provenance event writes for admin trust-policy upsert/enable changes and extended admin integration tests to assert emitted audit payloads/actor attribution.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -100,4 +102,5 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Add provenance/audit events for admin trust-policy writes and enable/disable operations.
+1. Wire admin UI (`H2`) to `GET/PUT/PATCH /admin/source-trust-policy`.
+2. Add runbook snippets for API-driven trust-policy management and audit verification queries.

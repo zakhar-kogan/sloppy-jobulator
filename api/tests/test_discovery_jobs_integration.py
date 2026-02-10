@@ -1257,6 +1257,7 @@ def test_moderation_merge_conflict_when_both_candidates_have_postings(
 
 def test_admin_source_trust_policy_crud_and_filters(
     api_client: TestClient,
+    database_url: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001001")
@@ -1282,6 +1283,74 @@ def test_admin_source_trust_policy_crud_and_filters(
     assert put_response.json()["source_key"] == source_key
     assert put_response.json()["rules_json"]["merge_decision_actions"]["needs_review"] == "reject"
 
+    created_operation = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'operation'
+            from provenance_events
+            where entity_type = 'source_trust_policy'
+              and event_type = 'policy_upserted'
+              and payload->>'source_key' = $1
+            order by id desc
+            limit 1
+            """,
+            source_key,
+        )
+    )
+    created_actor_id = _run(
+        _fetchval(
+            database_url,
+            """
+            select actor_id::text
+            from provenance_events
+            where entity_type = 'source_trust_policy'
+              and event_type = 'policy_upserted'
+              and payload->>'source_key' = $1
+            order by id desc
+            limit 1
+            """,
+            source_key,
+        )
+    )
+    assert created_operation == "created"
+    assert created_actor_id == "00000000-0000-0000-0000-000000001001"
+
+    update_response = api_client.put(
+        f"/admin/source-trust-policy/{source_key}",
+        json={
+            "trust_level": "trusted",
+            "auto_publish": True,
+            "requires_moderation": False,
+            "rules_json": {
+                "min_confidence": 0.8,
+                "merge_decision_actions": {"needs_review": "needs_review"},
+                "moderation_routes": {"needs_review": "dedupe.policy_refresh_queue"},
+            },
+            "enabled": True,
+        },
+        headers=auth_headers,
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["trust_level"] == "trusted"
+
+    updated_operation = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'operation'
+            from provenance_events
+            where entity_type = 'source_trust_policy'
+              and event_type = 'policy_upserted'
+              and payload->>'source_key' = $1
+            order by id desc
+            limit 1
+            """,
+            source_key,
+        )
+    )
+    assert updated_operation == "updated"
+
     list_response = api_client.get(
         "/admin/source-trust-policy",
         params={"source_key": source_key, "enabled": True},
@@ -1299,6 +1368,39 @@ def test_admin_source_trust_policy_crud_and_filters(
     )
     assert disable_response.status_code == 200
     assert disable_response.json()["enabled"] is False
+
+    previous_enabled = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'previous_enabled'
+            from provenance_events
+            where entity_type = 'source_trust_policy'
+              and event_type = 'policy_enabled_changed'
+              and payload->>'source_key' = $1
+            order by id desc
+            limit 1
+            """,
+            source_key,
+        )
+    )
+    current_enabled = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'enabled'
+            from provenance_events
+            where entity_type = 'source_trust_policy'
+              and event_type = 'policy_enabled_changed'
+              and payload->>'source_key' = $1
+            order by id desc
+            limit 1
+            """,
+            source_key,
+        )
+    )
+    assert previous_enabled == "true"
+    assert current_enabled == "false"
 
     enabled_filter_response = api_client.get(
         "/admin/source-trust-policy",
