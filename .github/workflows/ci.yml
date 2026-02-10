@@ -33,8 +33,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install API deps
-        run: pip install -e "./api[dev]"
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
 
       - name: API lint
         run: ruff check api
@@ -133,3 +133,60 @@ jobs:
 
       - name: Web typecheck
         run: pnpm --dir web typecheck
+
+  web-e2e-live:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sloppy_jobulator_test
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sloppy_jobulator_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      SJ_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/sloppy_jobulator_test
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/sloppy_jobulator_test
+      SJ_LIVE_E2E_API_URL: http://127.0.0.1:8000
+      SJ_LIVE_E2E_WEB_URL: http://127.0.0.1:3002
+      SJ_LIVE_E2E_SUPABASE_URL: http://127.0.0.1:54321
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install API deps
+        run: pip install -e "./api[dev]"
+
+      - name: Install Postgres client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: until pg_isready -h 127.0.0.1 -p 5432 -U postgres -d sloppy_jobulator_test; do sleep 1; done
+
+      - name: Apply schema and seed
+        run: bash scripts/apply_db_schema.sh
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install web deps
+        run: pnpm install --dir web --frozen-lockfile
+
+      - name: Web live E2E
+        run: pnpm --dir web test:e2e:live

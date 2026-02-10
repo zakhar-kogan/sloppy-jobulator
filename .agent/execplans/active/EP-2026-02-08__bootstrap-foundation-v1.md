@@ -110,4 +110,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
 1. Keep full moderation/admin E2E coverage under `L1` as the primary remaining validation gap.
-2. Extend the new mock-backed cockpit Playwright coverage into live backend-driven browser E2E (candidate/posting persistence assertions).
+2. Expand the new live backend cockpit Playwright coverage into additional negative/authz scenarios and keep `web-e2e-live` CI runtime stable.

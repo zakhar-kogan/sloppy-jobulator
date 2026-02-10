@@ -300,3 +300,40 @@ test("admin cockpit handles candidate, module, and jobs operator actions", async
   expect(capture.reapCalls).toBe(1);
   expect(postingStatus).toBe("archived");
 });
+
+test("merge form rejects selecting the same candidate as secondary", async ({ page }) => {
+  const startedAt = "2026-02-10T20:02:39.338252Z";
+  const candidate: CandidateRecord = {
+    id: PRIMARY_CANDIDATE_ID,
+    state: "needs_review",
+    dedupe_confidence: 0.91,
+    risk_flags: ["manual_review_needed"],
+    extracted_fields: { title: "E2E Primary Candidate" },
+    discovery_ids: ["c0315d98-ef37-49a3-b7ba-1cae768c8964"],
+    posting_id: POSTING_ID,
+    created_at: startedAt,
+    updated_at: startedAt,
+  };
+
+  await page.route(/\/api\/admin\/candidates(?:\?.*)?$/, async (route) => {
+    return jsonResponse(route, [candidate]);
+  });
+  await page.route(/\/api\/admin\/modules(?:\?.*)?$/, async (route) => {
+    return jsonResponse(route, []);
+  });
+  await page.route(/\/api\/admin\/jobs(?:\?.*)?$/, async (route) => {
+    return jsonResponse(route, []);
+  });
+  await page.route(/\/api\/admin\/candidates\/[^/?]+\/merge(?:\?.*)?$/, async (route) => {
+    return route.fulfill({ status: 500, body: "should not be called" });
+  });
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+
+  const mergeForm = page.locator("article:has(h2:text-is('Selected Candidate Actions')) form").nth(1);
+  await mergeForm.getByLabel("Secondary Candidate ID").fill(PRIMARY_CANDIDATE_ID);
+  await mergeForm.getByRole("button", { name: "Merge Candidate" }).click();
+
+  await expect(page.getByText("secondary_candidate_id must differ from selected candidate.")).toBeVisible();
+});

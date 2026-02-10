@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "test:contracts": "node --experimental-strip-types --test tests/*.test.ts",
     "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:live": "playwright test -c playwright.live.config.ts",
+    "test:e2e:live:headed": "playwright test -c playwright.live.config.ts --headed"
   },
   "dependencies": {
     "next": "14.2.5",
