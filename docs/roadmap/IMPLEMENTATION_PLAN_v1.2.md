@@ -33,7 +33,7 @@
 | E3 | done | Dedupe scorer v1 now computes deterministic merge confidence from strong/medium/tie-break signals (URL/hash, text similarity, NER/contact-domain overlap). |
 | E4 | done | Merge policy routing now records machine decisions (`auto_merged`/`needs_review`/`rejected`), auto-applies high-confidence merges, and routes uncertain/conflicting matches to moderation with provenance. |
 | F1 | done | Moderation APIs now cover approve/reject (state patch), merge, and override flows with role checks + audit events. |
-| F2 | in_progress | `source_trust_policy` routing now drives trusted/semi/untrusted publication paths and merge-outcome actions (`needs_review`/`rejected`/`auto_merged`) with source-specific moderation-route receipts; repository write-path validation strictly enforces allowed merge actions, route-label format, and unknown-key rejection; admin policy endpoints (`GET/PUT/PATCH /admin/source-trust-policy`) plus provenance audit events (`policy_upserted`, `policy_enabled_changed`) and integration contract tests are implemented. |
+| F2 | in_progress | `source_trust_policy` routing now drives trusted/semi/untrusted publication paths and merge-outcome actions (`needs_review`/`rejected`/`auto_merged`) with source-specific moderation-route receipts; repository write-path validation strictly enforces allowed merge actions, route-label format, and unknown-key rejection; admin policy endpoints (`GET/PUT/PATCH /admin/source-trust-policy`) plus provenance audit events (`policy_upserted`, `policy_enabled_changed`), integration contract tests, and API-oriented runbook guidance are implemented. |
 | F3 | done | Posting lifecycle transitions are now explicit via moderated `PATCH /postings/{id}` with transition guards, candidate synchronization, provenance writes, and DB-backed integration coverage. |
 | G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
 | G2 | done | Freshness scheduler endpoint + worker cadence now enqueue `check_freshness` jobs; result/dead-letter paths apply deterministic posting downgrade/archive transitions with provenance and integration coverage. |
@@ -57,7 +57,6 @@
 
 1. Continue `F2` trust-policy automation hardening around operator ergonomics and policy management surfaces.
 - Expose policy-management flows in admin UI (`H2`) against the new `GET/PUT/PATCH /admin/source-trust-policy` API surface.
-- Add operator runbook snippets for admin API usage + audit verification queries to reduce SQL-only operational dependency.
 
 ## Workstreams and Task Graph
 

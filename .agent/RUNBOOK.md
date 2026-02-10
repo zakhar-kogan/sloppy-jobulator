@@ -156,6 +156,69 @@ order by id desc
 limit 1;
 ```
 8. Every policy decision emits `provenance_events` with `event_type='trust_policy_applied'`; use this first when debugging unexpected publish/moderation outcomes.
+9. Admin API policy-management flow (preferred over direct SQL for day-to-day ops):
+- Required auth: bearer token for a human principal with `admin:write` scope (Supabase `app_metadata.role = admin`).
+- Suggested env vars:
+```bash
+export SJ_API_URL="http://localhost:8000"
+export SJ_ADMIN_BEARER="<admin-jwt>"
+```
+- List policies:
+```bash
+curl -sS \
+  -H "Authorization: Bearer ${SJ_ADMIN_BEARER}" \
+  "${SJ_API_URL}/admin/source-trust-policy?limit=50&offset=0"
+```
+- Upsert one policy:
+```bash
+curl -sS -X PUT \
+  -H "Authorization: Bearer ${SJ_ADMIN_BEARER}" \
+  -H "Content-Type: application/json" \
+  "${SJ_API_URL}/admin/source-trust-policy/source:high-risk-feed" \
+  -d '{
+    "trust_level": "trusted",
+    "auto_publish": true,
+    "requires_moderation": false,
+    "enabled": true,
+    "rules_json": {
+      "min_confidence": 0.0,
+      "merge_decision_actions": {"needs_review": "reject"},
+      "merge_decision_reasons": {"needs_review": "policy_auto_merge_blocked_requires_reject"},
+      "moderation_routes": {"needs_review": "dedupe.auto_merge_conflict_queue"}
+    }
+  }'
+```
+- Toggle enablement:
+```bash
+curl -sS -X PATCH \
+  -H "Authorization: Bearer ${SJ_ADMIN_BEARER}" \
+  -H "Content-Type: application/json" \
+  "${SJ_API_URL}/admin/source-trust-policy/source:high-risk-feed" \
+  -d '{"enabled": false}'
+```
+10. Validation contract for admin writes:
+- Invalid merge-routing payloads return HTTP `422` with repository validation detail (for example invalid action, invalid route label, unknown merge-decision key).
+11. Audit verification query for admin policy writes/toggles:
+```sql
+select
+  pe.event_type,
+  pe.actor_id::text as actor_user_id,
+  pe.payload->>'source_key' as source_key,
+  pe.payload->>'operation' as operation,
+  pe.payload->>'previous_enabled' as previous_enabled,
+  pe.payload->>'enabled' as enabled,
+  pe.created_at
+from provenance_events pe
+join source_trust_policy stp on stp.id = pe.entity_id
+where pe.entity_type = 'source_trust_policy'
+  and stp.source_key = 'source:high-risk-feed'
+  and pe.event_type in ('policy_upserted', 'policy_enabled_changed')
+order by pe.id desc
+limit 20;
+```
+12. Event semantics:
+- `policy_upserted`: emitted on admin `PUT`; payload includes `operation` (`created|updated`) plus current policy fields.
+- `policy_enabled_changed`: emitted on admin `PATCH`; payload includes `previous_enabled` and new `enabled` value.
 
 ## Incident basics
 1. Health check endpoint/command: `GET /healthz` on API.

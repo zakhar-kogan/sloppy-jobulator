@@ -14,8 +14,8 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `F2` admin policy-management API surface now emits provenance audit events for trust-policy upserts and enable toggles (`policy_upserted`, `policy_enabled_changed`) with actor attribution.
-Next: Wire admin UI (`H2`) to `GET/PUT/PATCH /admin/source-trust-policy` and add operator runbook snippets for API-driven policy management/audit verification.
+Now: `F2` runbook now documents API-first admin trust-policy operations (`GET/PUT/PATCH /admin/source-trust-policy`) and audit verification queries for `policy_upserted`/`policy_enabled_changed`.
+Next: Wire admin UI (`H2`) to `GET/PUT/PATCH /admin/source-trust-policy`.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
@@ -23,7 +23,7 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[CODE]` Added admin policy-management endpoints (`GET/PUT/PATCH /admin/source-trust-policy`) with `admin:write` scope enforcement and repository-backed list/upsert/enable-toggle behavior.
 - 2026-02-10 `[CODE]` Added provenance audit writes for admin trust-policy operations (`policy_upserted`, `policy_enabled_changed`) with actor attribution and prior/new enabled state payloads.
 - 2026-02-10 `[CODE]` Expanded integration API coverage to assert admin trust-policy audit events plus CRUD/filter/authz and invalid-rules contract failures.
-- 2026-02-10 `[CODE]` Updated roadmap `F2` notes/task graph to reflect shipped admin APIs plus audit events and revised follow-ups (`H2` wiring + runbook API snippets).
+- 2026-02-10 `[CODE]` Added `RUNBOOK` API-first trust-policy operator snippets (`curl` list/upsert/toggle), validation expectations, and SQL audit verification queries; updated roadmap follow-up to focus on `H2` wiring.
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
