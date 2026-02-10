@@ -110,3 +110,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
 1. Keep full moderation/admin E2E coverage under `L1` as the primary remaining validation gap.
+2. Promote the validated `/admin/cockpit` manual Chrome smoke path (candidate merge/patch/override, module toggles, jobs maintenance) into automated browser E2E checks.

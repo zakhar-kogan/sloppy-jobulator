@@ -9,6 +9,7 @@
 3. Added DB-backed integration tests for new admin module/job contracts and mutation receipts.
 4. Added web-side API-contract tests (`node:test`) for cockpit query/proxy path contracts and wired `pnpm --dir web test:contracts`.
 5. Updated roadmap/continuity/runbook/execplan notes to reflect new `H2` baseline and remaining `L1` E2E gap.
+6. Executed live Chrome DevTools cockpit smoke validation against local API/web stack and verified successful network payloads for merge/patch/override, module toggles, and jobs maintenance actions.
 
 ## What Went Wrong
 1. Issue: First DB-backed test run failed in sandbox with local Postgres connection denial.
@@ -27,6 +28,9 @@
 2. Improvement: Contract-first backend tests caught authz/mutation behavior at API boundaries for modules/jobs.
 - Evidence (time/readability/performance/manageability/modularity): `4/4` targeted DB integration tests validate read and safe-mutation paths.
 - Why it worked: Reused established integration test fixture/auth mocking patterns.
+3. Improvement: Browser-side network traces made manual E2E validation concrete even without full Playwright coverage.
+- Evidence (time/readability/performance/manageability/modularity): Captured `200` responses and returned bodies for candidate actions (`reqid=17/19/25`), module toggles (`reqid=28/30`), and job maintenance (`reqid=32/34`).
+- Why it worked: DevTools request inspection exposed exact request/response contracts beyond UI toast text.
 
 ## Reusable Learnings
 1. Learning: Admin operator surfaces should expose only bounded actions first (`enabled` toggles, queue maintenance triggers) before broader mutations.
@@ -46,6 +50,7 @@
   - `pnpm --dir web lint && pnpm --dir web build && pnpm --dir web typecheck`
   - `pnpm --dir web test:contracts`
   - `bash scripts/agent-hygiene-check.sh --mode project`
+  - Chrome DevTools interactive run at `http://127.0.0.1:3000/admin/cockpit` with network payload inspection (`reqid=17/19/25/28/30/32/34`)
 - Files changed:
   - `api/app/api/routes/admin.py`, `api/app/schemas/admin.py`, `api/app/services/repository.py`
   - `api/tests/test_discovery_jobs_integration.py`
@@ -58,4 +63,5 @@
   - API lint/typecheck: pass
   - Web lint/build/typecheck: pass
   - Web contract tests: pass (`9/9`)
+  - Manual cockpit browser smoke (Chrome DevTools): pass
   - Agent hygiene check: pass

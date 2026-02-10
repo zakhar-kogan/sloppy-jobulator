@@ -14,19 +14,18 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `H2` operator cockpit baseline is live with Next.js `/admin/cockpit` candidate queue actions (`PATCH /candidates`, `POST /candidates/{id}/merge`, `POST /candidates/{id}/override`) and admin module/job flows (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) through server proxy routes.
-Next: Complete `L1` full E2E moderation/admin flows now that backend + web API-contract coverage exists for cockpit routes/helpers.
+Now: `H2` operator cockpit baseline is live with Next.js `/admin/cockpit` candidate queue actions (`PATCH /candidates`, `POST /candidates/{id}/merge`, `POST /candidates/{id}/override`) and admin module/job flows (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) through server proxy routes, and manual Chrome DevTools smoke validation for those flows is complete.
+Next: Convert the manual cockpit smoke path into automated `L1` browser coverage (candidate moderation + module/job operator flows), then add explicit posting-status readback assertions for override side effects.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
 - 2026-02-10 `[CODE]` Added strict repository validation for `source_trust_policy.rules_json` merge-routing contracts (top-level key whitelist, decision-map unknown-key rejection, action whitelist, route-label format checks).
-- 2026-02-10 `[CODE]` Added admin policy-management endpoints (`GET/PUT/PATCH /admin/source-trust-policy`) with `admin:write` scope enforcement and repository-backed list/upsert/enable-toggle behavior.
-- 2026-02-10 `[CODE]` Added provenance audit writes for admin trust-policy operations (`policy_upserted`, `policy_enabled_changed`) with actor attribution and prior/new enabled state payloads.
-- 2026-02-10 `[CODE]` Expanded integration API coverage to assert admin trust-policy audit events plus CRUD/filter/authz and invalid-rules contract failures.
-- 2026-02-10 `[CODE]` Added `RUNBOOK` API-first trust-policy operator snippets (`curl` list/upsert/toggle), validation expectations, and SQL audit verification queries; updated roadmap follow-up to focus on `H2` wiring.
-- 2026-02-10 `[CODE]` Added Next.js admin trust-policy console (`/admin/source-trust-policy`) plus server-side proxy routes (`/api/admin/source-trust-policy`) to execute list/upsert/enable-toggle flows against the API surface with env-based admin bearer auth.
+- 2026-02-10 `[CODE]` Added admin policy-management endpoints (`GET/PUT/PATCH /admin/source-trust-policy`) plus provenance audit writes (`policy_upserted`, `policy_enabled_changed`) with actor attribution and prior/new enabled state payloads.
+- 2026-02-10 `[CODE]` Expanded integration API coverage to assert admin trust-policy CRUD/filter/authz, audit receipts, and invalid-rules contract failures.
+- 2026-02-10 `[CODE]` Added `RUNBOOK` API-first trust-policy operator snippets and Next.js trust-policy UI/proxy routes (`/admin/source-trust-policy`, `/api/admin/source-trust-policy`).
 - 2026-02-10 `[CODE]` Added admin operator cockpit baseline: new admin API module/job endpoints with provenance-backed safe mutations, Next.js `/admin/cockpit` candidate action workflows, and server proxy routes for candidates/modules/jobs operations.
 - 2026-02-10 `[CODE]` Added web-side API-contract tests (`node:test`) for cockpit query encoding and admin proxy route path builders; wired `pnpm --dir web test:contracts`.
+- 2026-02-10 `[TOOL]` Completed manual Chrome DevTools cockpit smoke flow (`merge -> patch -> override -> module disable/enable -> enqueue/reap`) with successful 200 responses and expected returned payloads.
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
@@ -46,3 +45,4 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[TOOL]` `pnpm --dir web test:contracts` passed (`9/9`).
 - 2026-02-10 `[TOOL]` `pnpm --dir web lint` passed.
 - 2026-02-10 `[TOOL]` `pnpm --dir web build -> pnpm --dir web typecheck` passed.
+- 2026-02-10 `[TOOL]` Chrome DevTools network validation on `http://127.0.0.1:3000/admin/cockpit` confirmed successful candidate merge/patch/override (`reqid=17/19/25`), module toggle disable/enable (`reqid=28/30`), and jobs maintenance counts (`reqid=32 -> {"count":0}`, `reqid=34 -> {"count":0}`).
