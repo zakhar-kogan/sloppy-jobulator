@@ -1487,43 +1487,148 @@ class PostgresRepository:
     async def get_posting(self, posting_id: str) -> dict[str, Any]:
         pool = await self._get_pool()
         try:
-            row = await pool.fetchrow(
-                """
-                select
-                  id::text as id,
-                  candidate_id::text as candidate_id,
-                  title,
-                  canonical_url,
-                  normalized_url,
-                  canonical_hash,
-                  organization_name,
-                  sector,
-                  degree_level,
-                  opportunity_kind,
-                  country,
-                  region,
-                  city,
-                  remote,
-                  tags,
-                  areas,
-                  description_text,
-                  application_url,
-                  deadline,
-                  source_refs,
-                  status::text as status,
-                  published_at,
-                  updated_at,
-                  created_at
-                from postings
-                where id = $1::uuid
-                """,
-                posting_id,
-            )
+            row = await self._fetch_posting_detail_row(conn=pool, posting_id=posting_id)
         except (pg_exc.InvalidTextRepresentationError, asyncpg.DataError) as exc:
             raise RepositoryNotFoundError("posting not found") from exc
         if not row:
             raise RepositoryNotFoundError("posting not found")
         return self._posting_detail_row_to_dict(row)
+
+    async def update_posting_status(
+        self,
+        *,
+        posting_id: str,
+        status: str,
+        actor_user_id: str,
+        reason: str | None,
+    ) -> dict[str, Any]:
+        pool = await self._get_pool()
+
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    posting_row = await conn.fetchrow(
+                        """
+                        select
+                          id::text as id,
+                          candidate_id::text as candidate_id,
+                          status::text as status
+                        from postings
+                        where id = $1::uuid
+                        for update
+                        """,
+                        posting_id,
+                    )
+                    if not posting_row:
+                        raise RepositoryNotFoundError("posting not found")
+
+                    from_status = str(posting_row["status"])
+                    if status != from_status:
+                        self._validate_posting_status_transition(from_status=from_status, to_status=status)
+
+                    candidate_id = posting_row["candidate_id"]
+                    from_candidate_state: str | None = None
+                    to_candidate_state: str | None = None
+                    if candidate_id:
+                        candidate_row = await conn.fetchrow(
+                            """
+                            select state::text as state
+                            from posting_candidates
+                            where id = $1::uuid
+                            for update
+                            """,
+                            candidate_id,
+                        )
+                        if candidate_row:
+                            from_candidate_state = str(candidate_row["state"])
+                            derived_candidate_state = self._derive_candidate_state_for_posting_status(status=status)
+                            if derived_candidate_state and derived_candidate_state != from_candidate_state:
+                                self._validate_candidate_transition(
+                                    from_state=from_candidate_state,
+                                    to_state=derived_candidate_state,
+                                )
+                                await conn.execute(
+                                    """
+                                    update posting_candidates
+                                    set state = $2::candidate_state
+                                    where id = $1::uuid
+                                    """,
+                                    candidate_id,
+                                    derived_candidate_state,
+                                )
+                                to_candidate_state = derived_candidate_state
+
+                    await conn.execute(
+                        """
+                        update postings
+                        set
+                          status = $2::posting_status,
+                          published_at = case
+                            when $2::posting_status = 'active' then coalesce(published_at, now())
+                            else published_at
+                          end
+                        where id = $1::uuid
+                        """,
+                        posting_id,
+                        status,
+                    )
+
+                    updated_row = await self._fetch_posting_detail_row(conn=conn, posting_id=posting_id)
+                    if not updated_row:
+                        raise RepositoryNotFoundError("posting not found")
+
+                    await conn.execute(
+                        """
+                        insert into provenance_events (
+                          entity_type,
+                          entity_id,
+                          event_type,
+                          actor_type,
+                          actor_id,
+                          payload
+                        )
+                        values ('posting', $1::uuid, 'status_changed', 'human', $2::uuid, $3::jsonb)
+                        """,
+                        posting_id,
+                        actor_user_id,
+                        json.dumps(
+                            {
+                                "from_status": from_status,
+                                "to_status": status,
+                                "reason": reason,
+                            }
+                        ),
+                    )
+
+                    if candidate_id and to_candidate_state and from_candidate_state:
+                        await conn.execute(
+                            """
+                            insert into provenance_events (
+                              entity_type,
+                              entity_id,
+                              event_type,
+                              actor_type,
+                              actor_id,
+                              payload
+                            )
+                            values ('posting_candidate', $1::uuid, 'state_changed', 'human', $2::uuid, $3::jsonb)
+                            """,
+                            candidate_id,
+                            actor_user_id,
+                            json.dumps(
+                                {
+                                    "from_state": from_candidate_state,
+                                    "to_state": to_candidate_state,
+                                    "reason": reason,
+                                    "source": "posting_status_patch",
+                                    "posting_id": posting_id,
+                                }
+                            ),
+                        )
+
+                    return self._posting_detail_row_to_dict(updated_row)
+        except (pg_exc.InvalidTextRepresentationError, asyncpg.DataError) as exc:
+            raise RepositoryNotFoundError("posting not found") from exc
 
     async def _fetch_candidate_row(self, *, conn: asyncpg.Connection, candidate_id: str) -> asyncpg.Record | None:
         return await conn.fetchrow(
@@ -1548,6 +1653,45 @@ class PostgresRepository:
             group by pc.id, p.id
             """,
             candidate_id,
+        )
+
+    async def _fetch_posting_detail_row(
+        self,
+        *,
+        conn: asyncpg.Connection | asyncpg.Pool,
+        posting_id: str,
+    ) -> asyncpg.Record | None:
+        return await conn.fetchrow(
+            """
+            select
+              id::text as id,
+              candidate_id::text as candidate_id,
+              title,
+              canonical_url,
+              normalized_url,
+              canonical_hash,
+              organization_name,
+              sector,
+              degree_level,
+              opportunity_kind,
+              country,
+              region,
+              city,
+              remote,
+              tags,
+              areas,
+              description_text,
+              application_url,
+              deadline,
+              source_refs,
+              status::text as status,
+              published_at,
+              updated_at,
+              created_at
+            from postings
+            where id = $1::uuid
+            """,
+            posting_id,
         )
 
     async def _get_pool(self) -> asyncpg.Pool:
@@ -1712,6 +1856,30 @@ class PostgresRepository:
         allowed = allowed_transitions.get(from_state)
         if not allowed or to_state not in allowed:
             raise RepositoryConflictError(f"invalid state transition: {from_state} -> {to_state}")
+
+    @staticmethod
+    def _validate_posting_status_transition(*, from_status: str, to_status: str) -> None:
+        allowed_transitions = {
+            "active": {"stale", "archived", "closed"},
+            "stale": {"active", "archived", "closed"},
+            "archived": {"active", "stale", "closed"},
+            "closed": {"archived"},
+        }
+        if to_status == from_status:
+            return
+        allowed = allowed_transitions.get(from_status)
+        if not allowed or to_status not in allowed:
+            raise RepositoryConflictError(f"invalid posting status transition: {from_status} -> {to_status}")
+
+    @staticmethod
+    def _derive_candidate_state_for_posting_status(*, status: str) -> str | None:
+        state_by_status = {
+            "active": "published",
+            "stale": "published",
+            "archived": "archived",
+            "closed": "closed",
+        }
+        return state_by_status.get(status)
 
     @staticmethod
     def _derive_posting_status_for_candidate_state(state: str) -> str | None:

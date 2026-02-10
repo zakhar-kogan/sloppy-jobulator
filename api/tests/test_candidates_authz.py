@@ -41,6 +41,34 @@ class FakeModerationRepository:
                 "created_at": now,
             }
         ]
+        self._postings: list[dict[str, Any]] = [
+            {
+                "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "candidate_id": "11111111-1111-1111-1111-111111111111",
+                "title": "Example Role",
+                "canonical_url": "https://example.edu/jobs/example-role",
+                "normalized_url": "https://example.edu/jobs/example-role",
+                "canonical_hash": "example-hash-1",
+                "organization_name": "Example Institute",
+                "sector": None,
+                "degree_level": None,
+                "opportunity_kind": None,
+                "country": "US",
+                "region": None,
+                "city": None,
+                "remote": True,
+                "tags": ["ml"],
+                "areas": [],
+                "description_text": "Example role description",
+                "application_url": None,
+                "deadline": None,
+                "source_refs": [{"kind": "discovery", "id": "22222222-2222-2222-2222-222222222222"}],
+                "status": "active",
+                "published_at": now,
+                "created_at": now,
+                "updated_at": now,
+            }
+        ]
 
     async def list_candidates(self, limit: int, offset: int, state: str | None) -> list[dict[str, Any]]:
         rows = self._candidates
@@ -123,6 +151,24 @@ class FakeModerationRepository:
     async def list_candidate_events(self, *, candidate_id: str, limit: int, offset: int) -> list[dict[str, Any]]:
         rows = [row for row in self._events if row["entity_id"] == candidate_id]
         return rows[offset : offset + limit]
+
+    async def update_posting_status(
+        self,
+        *,
+        posting_id: str,
+        status: str,
+        actor_user_id: str,
+        reason: str | None,
+    ) -> dict[str, Any]:
+        for row in self._postings:
+            if row["id"] != posting_id:
+                continue
+            row["status"] = status
+            row["updated_at"] = datetime.now(timezone.utc)
+            if status == "active" and row["published_at"] is None:
+                row["published_at"] = datetime.now(timezone.utc)
+            return row
+        raise RepositoryNotFoundError("posting not found")
 
 
 @pytest.fixture
@@ -259,6 +305,35 @@ def test_candidates_events_allow_moderator(authz_client: TestClient, monkeypatch
     body = response.json()
     assert len(body) >= 1
     assert body[0]["event_type"] in {"materialized", "merge_applied"}
+
+
+def test_postings_patch_denies_user_role(authz_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_supabase_user(
+        monkeypatch,
+        {"id": "user-1", "app_metadata": {"role": "user"}},
+    )
+
+    response = authz_client.patch(
+        "/postings/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        json={"status": "archived", "reason": "manual moderation action"},
+        headers={"Authorization": "Bearer token"},
+    )
+    assert response.status_code == 403
+
+
+def test_postings_patch_allows_moderator(authz_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_supabase_user(
+        monkeypatch,
+        {"id": "moderator-1", "app_metadata": {"role": "moderator"}},
+    )
+
+    response = authz_client.patch(
+        "/postings/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        json={"status": "stale", "reason": "freshness warning"},
+        headers={"Authorization": "Bearer token"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "stale"
 
 
 def test_role_resolution_uses_only_app_metadata_for_elevated_roles() -> None:

@@ -46,3 +46,8 @@ class PostingDetailOut(BaseModel):
     published_at: datetime | None = None
     updated_at: datetime
     created_at: datetime
+
+
+class PostingPatchRequest(BaseModel):
+    status: PostingStatus
+    reason: str | None = None

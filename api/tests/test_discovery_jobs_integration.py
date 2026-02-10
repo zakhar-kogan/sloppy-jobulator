@@ -694,6 +694,125 @@ def test_moderation_candidate_state_transitions_update_posting_status(
     assert active_status_count == 1
 
 
+def test_posting_lifecycle_patch_transitions_and_candidate_sync(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="moderator", user_id="00000000-0000-0000-0000-000000000322")
+    candidate_id, posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-posting-lifecycle-1",
+        canonical_hash="posting-lifecycle-hash-1",
+    )
+
+    stale_response = api_client.patch(
+        f"/postings/{posting_id}",
+        json={"status": "stale", "reason": "freshness-check-warning"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert stale_response.status_code == 200
+    assert stale_response.json()["status"] == "stale"
+
+    stale_candidate_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            candidate_id,
+        )
+    )
+    assert stale_candidate_state == "published"
+
+    archived_response = api_client.patch(
+        f"/postings/{posting_id}",
+        json={"status": "archived", "reason": "stale-threshold-exceeded"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert archived_response.status_code == 200
+    assert archived_response.json()["status"] == "archived"
+
+    archived_candidate_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            candidate_id,
+        )
+    )
+    assert archived_candidate_state == "archived"
+
+    reopen_response = api_client.patch(
+        f"/postings/{posting_id}",
+        json={"status": "active", "reason": "source-confirmed-open"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert reopen_response.status_code == 200
+    assert reopen_response.json()["status"] == "active"
+    assert reopen_response.json()["published_at"] is not None
+
+    reopened_candidate_state = _run(
+        _fetchval(
+            database_url,
+            "select state::text from posting_candidates where id = $1::uuid",
+            candidate_id,
+        )
+    )
+    assert reopened_candidate_state == "published"
+
+    status_changed_event_count = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from provenance_events
+            where entity_type = 'posting'
+              and entity_id = $1::uuid
+              and event_type = 'status_changed'
+            """,
+            posting_id,
+        )
+    )
+    assert status_changed_event_count == 3
+
+
+def test_posting_lifecycle_patch_rejects_invalid_transition(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="moderator", user_id="00000000-0000-0000-0000-000000000323")
+    _, posting_id = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-posting-lifecycle-2",
+        canonical_hash="posting-lifecycle-hash-2",
+    )
+
+    close_response = api_client.patch(
+        f"/postings/{posting_id}",
+        json={"status": "closed", "reason": "position-closed"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert close_response.status_code == 200
+    assert close_response.json()["status"] == "closed"
+
+    invalid_reopen_response = api_client.patch(
+        f"/postings/{posting_id}",
+        json={"status": "active", "reason": "invalid-direct-reopen"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert invalid_reopen_response.status_code == 409
+
+    status_after_conflict = _run(
+        _fetchval(
+            database_url,
+            "select status::text from postings where id = $1::uuid",
+            posting_id,
+        )
+    )
+    assert status_after_conflict == "closed"
+
+
 def test_moderation_invalid_transition_returns_conflict(
     api_client: TestClient,
     database_url: str,

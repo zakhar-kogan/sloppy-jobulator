@@ -34,7 +34,7 @@
 | E4 | in_progress | Manual moderator merge path now records `candidate_merge_decisions` + provenance; auto-merge/review-queue policy engine remains pending. |
 | F1 | done | Moderation APIs now cover approve/reject (state patch), merge, and override flows with role checks + audit events. |
 | F2 | in_progress | `source_trust_policy` routing now drives trusted/semi/untrusted publication paths with DB-backed integration coverage; broader policy automation remains pending. |
-| F3 | in_progress | `extract` job completion now projects baseline postings; lifecycle transitions (`stale/archived/closed`) remain pending. |
+| F3 | done | Posting lifecycle transitions are now explicit via moderated `PATCH /postings/{id}` with transition guards, candidate synchronization, provenance writes, and DB-backed integration coverage. |
 | G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
 | G2 | not_started | Freshness checker job flow not implemented. |
 | H1 | in_progress | Minimal Next.js public shell exists; full catalogue UX pending. |
@@ -48,18 +48,14 @@
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, and moderation authz/state/merge/override paths; CI now runs DB-backed integration as a separate required job, while end-to-end UI moderation tests remain pending. |
+| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, moderation authz/state/merge/override, and posting lifecycle patch transitions; CI now runs DB-backed integration as a separate required job, while end-to-end UI moderation tests remain pending. |
 | L2 | not_started | Load/perf testing not implemented. |
 | M1 | in_progress | Quality CI is split into fast and DB-backed integration required checks; full deploy + migration gate pipeline remains pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
 
 ## Next Implementation Steps (Priority Order)
 
-1. Advance `F3` from partial to production-ready.
-- Implement posting lifecycle transitions (`active/stale/archived/closed`) beyond baseline projection.
-- Add contract/integration coverage for lifecycle transitions and downgrade semantics.
-
-2. Implement `G2` freshness checks and archive transitions.
+1. Implement `G2` freshness checks and archive transitions.
 - Add scheduled freshness checker jobs with bounded retries before downgrade/archive.
 - Ensure lifecycle updates are deterministic and auditable with provenance receipts.
 

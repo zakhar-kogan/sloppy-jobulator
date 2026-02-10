@@ -1,7 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
 
-from app.schemas.postings import PostingDetailOut, PostingListOut, PostingSortBy, PostingStatus, SortDir
-from app.services.repository import RepositoryNotFoundError, RepositoryUnavailableError, get_repository
+from app.core.security import get_human_principal
+from app.schemas.postings import PostingDetailOut, PostingListOut, PostingPatchRequest, PostingSortBy, PostingStatus, SortDir
+from app.services.repository import (
+    RepositoryConflictError,
+    RepositoryNotFoundError,
+    RepositoryUnavailableError,
+    get_repository,
+)
 
 router = APIRouter()
 
@@ -46,4 +52,35 @@ async def get_posting(posting_id: str, repository=Depends(get_repository)) -> Po
         raise HTTPException(status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except RepositoryNotFoundError as exc:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return PostingDetailOut(**row)
+
+
+@router.patch("/{posting_id}", response_model=PostingDetailOut)
+async def patch_posting(
+    posting_id: str,
+    payload: PostingPatchRequest,
+    principal=Depends(get_human_principal),
+    repository=Depends(get_repository),
+) -> PostingDetailOut:
+    try:
+        principal.require_scopes({"moderation:write"})
+    except PermissionError as exc:
+        raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    if not principal.actor_id:
+        raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="invalid human principal")
+
+    try:
+        row = await repository.update_posting_status(
+            posting_id=posting_id,
+            status=payload.status,
+            actor_user_id=principal.actor_id,
+            reason=payload.reason,
+        )
+    except RepositoryUnavailableError as exc:
+        raise HTTPException(status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except RepositoryNotFoundError as exc:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RepositoryConflictError as exc:
+        raise HTTPException(status_code=http_status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return PostingDetailOut(**row)

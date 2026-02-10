@@ -10,7 +10,7 @@ Public research opportunities aggregator. This repo contains a monorepo scaffold
 
 ## Current Phase
 
-Phase 3 baseline implementation is in progress (`A3/F2` policy/bootstrap groundwork landed; `F3/G2` lifecycle/freshness work remains).
+Phase 3 baseline implementation is in progress (`A3/F2/F3` baseline landed; `G2` freshness scheduling/automation remains).
 
 ## Quick Start
 
