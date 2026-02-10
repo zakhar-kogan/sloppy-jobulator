@@ -56,7 +56,7 @@
 ## Next Implementation Steps (Priority Order)
 
 1. Continue `F2` trust-policy automation hardening around operator ergonomics and policy management surfaces.
-- Document/admin-surface the new `rules_json` merge routing keys (`merge_decision_actions`, `merge_decision_reasons`, `moderation_routes`).
+- Add operator-facing policy management surfaces/validation for `rules_json` merge routing keys (`merge_decision_actions`, `merge_decision_reasons`, `moderation_routes`).
 - Extend integration coverage for additional mixed trust + dedupe edge cases beyond current fallback coverage.
 
 ## Workstreams and Task Graph

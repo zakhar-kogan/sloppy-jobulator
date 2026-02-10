@@ -73,7 +73,89 @@ where id = '00000000-0000-0000-0000-000000000000'::uuid;
 2. Publish routing currently maps to:
 - auto-publish path: candidate `published`, posting `active`
 - moderation path: candidate `needs_review`, posting `archived`
-3. Every policy decision emits `provenance_events` with `event_type='trust_policy_applied'`; use this first when debugging unexpected publish/moderation outcomes.
+3. Merge-aware routing keys (inside `source_trust_policy.rules_json`) are:
+- `merge_decision_actions`: maps dedupe decisions to candidate action (`needs_review`, `reject`, `archive`, `preserve`).
+- `merge_decision_reasons`: overrides policy `reason` receipt per merge decision.
+- `moderation_routes`: assigns queue route labels for `needs_review`/`rejected` decisions.
+- `default_moderation_route`: fallback route label when no per-decision route is set.
+4. `auto_merge_blocked` handling:
+- machine auto-merge fallback writes merge decision `needs_review` plus `merge_metadata.auto_merge_blocked=true`.
+- policy routing keys do not branch directly on metadata; route this path via `needs_review` overrides and inspect metadata in provenance for audits.
+5. Example: force rejected state when auto-merge fallback occurs for a sensitive source:
+```sql
+insert into source_trust_policy (
+  source_key,
+  trust_level,
+  auto_publish,
+  requires_moderation,
+  rules_json,
+  enabled
+)
+values (
+  'source:high-risk-feed',
+  'trusted',
+  true,
+  false,
+  jsonb_build_object(
+    'min_confidence', 0.0,
+    'merge_decision_actions', jsonb_build_object('needs_review', 'reject'),
+    'merge_decision_reasons', jsonb_build_object('needs_review', 'policy_auto_merge_blocked_requires_reject'),
+    'moderation_routes', jsonb_build_object('needs_review', 'dedupe.auto_merge_conflict_queue')
+  ),
+  true
+)
+on conflict (source_key) do update set
+  trust_level = excluded.trust_level,
+  auto_publish = excluded.auto_publish,
+  requires_moderation = excluded.requires_moderation,
+  rules_json = excluded.rules_json,
+  enabled = true;
+```
+6. Example: keep fallback in moderation queue (no auto-reject), but route to dedicated triage:
+```sql
+insert into source_trust_policy (
+  source_key,
+  trust_level,
+  auto_publish,
+  requires_moderation,
+  rules_json,
+  enabled
+)
+values (
+  'source:manual-triage-feed',
+  'trusted',
+  true,
+  false,
+  jsonb_build_object(
+    'min_confidence', 0.0,
+    'merge_decision_actions', jsonb_build_object('needs_review', 'needs_review'),
+    'merge_decision_reasons', jsonb_build_object('needs_review', 'policy_manual_triage_required'),
+    'moderation_routes', jsonb_build_object('needs_review', 'dedupe.manual_triage')
+  ),
+  true
+)
+on conflict (source_key) do update set
+  trust_level = excluded.trust_level,
+  auto_publish = excluded.auto_publish,
+  requires_moderation = excluded.requires_moderation,
+  rules_json = excluded.rules_json,
+  enabled = true;
+```
+7. Verification query (latest policy receipt for candidate):
+```sql
+select
+  payload->>'reason' as reason,
+  payload->>'moderation_route' as moderation_route,
+  payload->>'merge_decision' as merge_decision,
+  payload->'merge_metadata'->>'auto_merge_blocked' as auto_merge_blocked
+from provenance_events
+where entity_type = 'posting_candidate'
+  and entity_id = '00000000-0000-0000-0000-000000000000'::uuid
+  and event_type = 'trust_policy_applied'
+order by id desc
+limit 1;
+```
+8. Every policy decision emits `provenance_events` with `event_type='trust_policy_applied'`; use this first when debugging unexpected publish/moderation outcomes.
 
 ## Incident basics
 1. Health check endpoint/command: `GET /healthz` on API.

@@ -14,8 +14,8 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `F2` trust-policy routing now consumes merge-policy outcomes with policy-configurable merge actions/reasons/moderation routes and explicit `rejected` handling.
-Next: Expose/administer `source_trust_policy.rules_json` merge-routing keys and extend edge coverage for auto-merge-blocked conflict paths.
+Now: `F2` trust-policy routing supports merge-aware overrides and runbook now includes concrete `rules_json` fallback patterns for `auto_merge_blocked` handling.
+Next: Build operator-facing policy management/validation for merge-routing keys and broaden mixed trust/dedupe edge coverage.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
@@ -24,7 +24,7 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[CODE]` Added shared merge execution helper so manual moderator merges and machine auto-merges share consistent `candidate_merge_decisions` + provenance behavior.
 - 2026-02-10 `[CODE]` Added auto-merge short-circuit to keep canonical posting ownership stable while archiving secondary candidates and retaining discovery/evidence links on the primary.
 - 2026-02-10 `[CODE]` Added review-routing override so uncertain/conflicting dedupe outcomes force moderation queue state even when trust-policy would otherwise auto-publish.
-- 2026-02-10 `[CODE]` Expanded `source_trust_policy` merge routing to apply policy-configurable `merge_decision_actions`/`merge_decision_reasons`/`moderation_routes` and default `rejected` handling.
+- 2026-02-10 `[CODE]` Expanded `source_trust_policy` merge routing to apply policy-configurable `merge_decision_actions`/`merge_decision_reasons`/`moderation_routes`, default `rejected` handling, and runbook fallback examples.
 - 2026-02-10 `[CODE]` Added DB-backed integration coverage for source-specific overrides on dedupe `needs_review`/`rejected` outcomes, including forced `auto_merge_blocked` fallback routing.
 
 ## Working set
@@ -55,3 +55,4 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[TOOL]` `make lint` and `make typecheck` failed on host (`ruff`/`mypy` missing in PATH); equivalent `uv run --project api --extra dev` checks passed for touched API files.
 - 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/tests/test_discovery_jobs_integration.py` passed after fallback test addition.
 - 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> (escalated) SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "auto_merge_fallbacks_to_needs_review" -> (escalated) ... -k "dedupe_policy or trust_policy or auto_merge_fallbacks_to_needs_review" -> make db-down` passed (`1/1` selected, then `9/9` selected).
+- 2026-02-10 `[CODE]` Added `RUNBOOK` SQL examples for merge-routing policy patterns, including `auto_merge_blocked` fallback handling and provenance verification query.
