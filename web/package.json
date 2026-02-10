@@ -9,7 +9,9 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test:contracts": "node --experimental-strip-types --test tests/*.test.ts"
+    "test:contracts": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "next": "14.2.5",
@@ -17,6 +19,7 @@
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.55.0",
     "@types/node": "20.14.12",
     "@types/react": "18.3.3",
     "@types/react-dom": "18.3.0",

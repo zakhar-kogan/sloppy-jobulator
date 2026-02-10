@@ -10,6 +10,8 @@ __pycache__/
 node_modules/
 .next/
 *.tsbuildinfo
+web/playwright-report/
+web/test-results/
 
 # Local env
 .env

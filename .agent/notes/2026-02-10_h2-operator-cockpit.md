@@ -10,6 +10,7 @@
 4. Added web-side API-contract tests (`node:test`) for cockpit query/proxy path contracts and wired `pnpm --dir web test:contracts`.
 5. Updated roadmap/continuity/runbook/execplan notes to reflect new `H2` baseline and remaining `L1` E2E gap.
 6. Executed live Chrome DevTools cockpit smoke validation against local API/web stack and verified successful network payloads for merge/patch/override, module toggles, and jobs maintenance actions.
+7. Added Playwright browser automation for the cockpit path (`web/tests-e2e/admin-cockpit.spec.ts`) with mocked `/api/admin/*` contracts and wired `pnpm --dir web test:e2e`.
 
 ## What Went Wrong
 1. Issue: First DB-backed test run failed in sandbox with local Postgres connection denial.
@@ -20,6 +21,14 @@
 - Root cause: zsh interpreted `[candidateId]` as glob patterns.
 - Early signal missed: Command used unquoted paths with brackets.
 - Prevention rule: Always quote bracketed app-router paths (`'[param]'`) in shell commands.
+3. Issue: Chrome DevTools MCP transport became unavailable (`Transport closed`) during follow-up validation attempts.
+- Root cause: Local DevTools helper process state drifted from MCP tool lifecycle in the session.
+- Early signal missed: repeated `list_pages` failures indicated bridge-level outage rather than page-level issues.
+- Prevention rule: Fall back to Playwright/browser automation when DevTools transport stays closed after one cleanup/reconnect cycle.
+4. Issue: Playwright run failed in sandbox because web server bind was denied (`listen EPERM 127.0.0.1:3001`).
+- Root cause: sandbox network restrictions block local port binding for this command path.
+- Early signal missed: this repo already had a DB-integration escalation helper pattern for localhost constraints.
+- Prevention rule: rerun browser E2E commands with escalation immediately after first localhost bind denial.
 
 ## What Went Right
 1. Improvement: Shared admin proxy helper reduced repeated env/error handling across all new web proxy routes.
@@ -31,6 +40,9 @@
 3. Improvement: Browser-side network traces made manual E2E validation concrete even without full Playwright coverage.
 - Evidence (time/readability/performance/manageability/modularity): Captured `200` responses and returned bodies for candidate actions (`reqid=17/19/25`), module toggles (`reqid=28/30`), and job maintenance (`reqid=32/34`).
 - Why it worked: DevTools request inspection exposed exact request/response contracts beyond UI toast text.
+4. Improvement: Mock-backed Playwright cockpit flow now provides deterministic browser-level regression coverage without requiring API/DB orchestration.
+- Evidence (time/readability/performance/manageability/modularity): `pnpm --dir web test:e2e` passes (`1/1`) validating merge/patch/override/module-toggle/jobs-maintenance UI flows and request payload contracts.
+- Why it worked: Route interception isolates UI contract behavior and keeps runtime dependencies minimal.
 
 ## Reusable Learnings
 1. Learning: Admin operator surfaces should expose only bounded actions first (`enabled` toggles, queue maintenance triggers) before broader mutations.
@@ -51,12 +63,15 @@
   - `pnpm --dir web test:contracts`
   - `bash scripts/agent-hygiene-check.sh --mode project`
   - Chrome DevTools interactive run at `http://127.0.0.1:3000/admin/cockpit` with network payload inspection (`reqid=17/19/25/28/30/32/34`)
+  - `(escalated) fnm exec --using 24.13.0 pnpm --dir web add -D @playwright/test@1.55.0 --store-dir <pnpm-store-dir>`
+  - `(escalated) fnm exec --using 24.13.0 pnpm --dir web test:e2e`
 - Files changed:
   - `api/app/api/routes/admin.py`, `api/app/schemas/admin.py`, `api/app/services/repository.py`
   - `api/tests/test_discovery_jobs_integration.py`
   - `web/app/admin/cockpit/*`, `web/app/api/admin/candidates/**`, `web/app/api/admin/modules/**`, `web/app/api/admin/jobs/**`
   - `web/lib/admin-api.ts`, `web/lib/admin-cockpit.ts`, `web/lib/admin-cockpit-utils.ts`, `web/lib/admin-proxy-paths.ts`, `web/lib/admin-source-trust-policy-api.ts`
   - `web/tests/admin-cockpit-utils.test.ts`, `web/tests/admin-proxy-paths.test.ts`, `web/package.json`, `web/tsconfig.json`
+  - `web/playwright.config.ts`, `web/tests-e2e/admin-cockpit.spec.ts`, `.gitignore`, `web/pnpm-lock.yaml`
   - `.agent/CONTINUITY.md`, `.agent/RUNBOOK.md`, `.agent/execplans/active/EP-2026-02-08__bootstrap-foundation-v1.md`, `docs/roadmap/IMPLEMENTATION_PLAN_v1.2.md`
 - Tests/checks:
   - Targeted DB integration: pass (`4 passed`)
@@ -64,4 +79,5 @@
   - Web lint/build/typecheck: pass
   - Web contract tests: pass (`9/9`)
   - Manual cockpit browser smoke (Chrome DevTools): pass
+  - Web Playwright cockpit E2E: pass (`1/1`)
   - Agent hygiene check: pass

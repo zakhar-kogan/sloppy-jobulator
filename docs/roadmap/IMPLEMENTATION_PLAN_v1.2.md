@@ -48,7 +48,7 @@
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, freshness enqueue/dead-letter downgrade flow, moderation authz/state/merge/override, posting lifecycle patch transitions, and admin modules/jobs contract endpoints; web API-contract tests now cover cockpit query/proxy path mapping; manual Chrome DevTools cockpit smoke validation passed on 2026-02-10, while automated end-to-end UI moderation coverage remains pending. |
+| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, freshness enqueue/dead-letter downgrade flow, moderation authz/state/merge/override, posting lifecycle patch transitions, and admin modules/jobs contract endpoints; web API-contract tests cover cockpit query/proxy path mapping; manual Chrome DevTools cockpit smoke validation passed on 2026-02-10; Playwright now automates the cockpit path with mocked `/api/admin/*` responses; full live backend-driven UI moderation coverage remains pending. |
 | L2 | not_started | Load/perf testing not implemented. |
 | M1 | in_progress | Quality CI is split into fast and DB-backed integration required checks; full deploy + migration gate pipeline remains pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
