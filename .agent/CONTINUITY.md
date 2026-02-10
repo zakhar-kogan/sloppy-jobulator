@@ -14,12 +14,12 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `H2` operator cockpit baseline is live with Next.js `/admin/cockpit` candidate queue actions (`PATCH /candidates`, `POST /candidates/{id}/merge`, `POST /candidates/{id}/override`) and admin module/job flows (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) through server proxy routes, with both mock-backed and live backend-backed Playwright coverage (happy path + negative/authz: merge conflict, 401 missing token, 403 non-admin, 422 invalid payload) plus CI `web-e2e-live` wiring.
-Next: Expand live persistence assertions beyond current candidate/posting/module checks, then harden `web-e2e-live` CI runtime and add admin proxy failure-mapping contract coverage.
+Now: `H2` operator cockpit baseline is live with Next.js `/admin/cockpit` candidate queue actions (`PATCH /candidates`, `POST /candidates/{id}/merge`, `POST /candidates/{id}/override`) and admin module/job flows (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) through server proxy routes, with both mock-backed and live backend-backed Playwright coverage across happy-path, negative/authz (`409` conflict surfaced, `401`, `403`, `422`), and expanded persistence assertions (candidate events, module `updated_at` mutations, job enqueue/reap state transitions).
+Next: Harden `web-e2e-live` CI runtime and add admin proxy failure-mapping contract coverage, then prepare PR matrix + known-risk summary for L1 full E2E scope.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
-- 2026-02-10 `[CODE]` Expanded integration API coverage to assert admin trust-policy CRUD/filter/authz, audit receipts, and invalid-rules contract failures.
+- 2026-02-10 `[CODE]` Expanded live backend Playwright cockpit persistence assertions to validate candidate provenance events (`merge_applied`, `merged_away`, `state_overridden`), module toggle `updated_at` mutations, and admin jobs enqueue/reap DB-observable state transitions.
 - 2026-02-10 `[CODE]` Added `RUNBOOK` API-first trust-policy operator snippets and Next.js trust-policy UI/proxy routes (`/admin/source-trust-policy`, `/api/admin/source-trust-policy`).
 - 2026-02-10 `[CODE]` Added admin operator cockpit baseline: new admin API module/job endpoints with provenance-backed safe mutations, Next.js `/admin/cockpit` candidate action workflows, and server proxy routes for candidates/modules/jobs operations.
 - 2026-02-10 `[CODE]` Added web-side API-contract tests (`node:test`) for cockpit query encoding and admin proxy route path builders; wired `pnpm --dir web test:contracts`.
@@ -52,3 +52,4 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[TOOL]` `(escalated) fnm exec --using 24.13.0 pnpm --dir web test:e2e` passed (`2/2`) after isolating live specs via `testIgnore`.
 - 2026-02-10 `[TOOL]` `(escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live` passed (`3/3`) after adding negative/authz live cockpit scenarios.
 - 2026-02-10 `[TOOL]` `fnm exec --using 24.13.0 pnpm --dir web typecheck -> bash scripts/agent-hygiene-check.sh --mode project` passed after live-spec expansion.
+- 2026-02-10 `[TOOL]` `(escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live` passed (`3/3`) after adding expanded live persistence assertions.
