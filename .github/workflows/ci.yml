@@ -161,7 +161,7 @@ jobs:
       SJ_LIVE_E2E_WEB_URL: http://127.0.0.1:3002
       SJ_LIVE_E2E_SUPABASE_URL: http://127.0.0.1:54321
       UV_CACHE_DIR: ~/.cache/uv
-      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+      PLAYWRIGHT_BROWSERS_PATH: /home/runner/.cache/ms-playwright
     steps:
       - name: Checkout
         uses: actions/checkout@v4
