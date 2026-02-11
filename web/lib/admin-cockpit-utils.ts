@@ -1,3 +1,16 @@
+import type { CandidateState } from "./admin-cockpit";
+
+const ALLOWED_CANDIDATE_TRANSITIONS: Record<CandidateState, readonly CandidateState[]> = {
+  discovered: ["processed", "needs_review", "rejected", "archived"],
+  processed: ["publishable", "needs_review", "rejected", "archived"],
+  needs_review: ["publishable", "rejected", "archived", "processed"],
+  publishable: ["published", "rejected", "needs_review", "archived"],
+  published: ["archived", "closed"],
+  archived: ["published", "closed"],
+  closed: ["archived"],
+  rejected: ["needs_review", "archived"]
+};
+
 export function encodeAdminQuery(params: Record<string, string | number | boolean | null | undefined>): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -23,4 +36,23 @@ export function parseAdminCount(payload: unknown): number {
   }
 
   return 0;
+}
+
+export function canTransitionCandidateState(fromState: CandidateState, toState: CandidateState): boolean {
+  if (fromState === toState) {
+    return true;
+  }
+
+  return ALLOWED_CANDIDATE_TRANSITIONS[fromState].includes(toState);
+}
+
+export function listPatchCandidateStates(
+  fromState: CandidateState | null,
+  allStates: readonly CandidateState[]
+): CandidateState[] {
+  if (!fromState) {
+    return [...allStates];
+  }
+
+  return allStates.filter((candidateState) => canTransitionCandidateState(fromState, candidateState));
 }

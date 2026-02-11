@@ -234,6 +234,10 @@ limit 20;
 15. Operator cockpit web path:
 - URL: `/admin/cockpit` in the Next.js app.
 - Server proxy routes: `/api/admin/candidates/**`, `/api/admin/modules/**`, `/api/admin/jobs/**` forwarding to API with `SJ_ADMIN_BEARER`.
+16. Cockpit guardrails (UI-level):
+- Patch action options are constrained to backend-valid transitions for the selected candidate state.
+- Patch to terminal states (`rejected|archived|closed`) requires reason before submit.
+- Merge and override actions require reason before submit.
 
 ## Incident basics
 1. Health check endpoint/command: `GET /healthz` on API.

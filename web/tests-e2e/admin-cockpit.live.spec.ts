@@ -437,6 +437,76 @@ test("cockpit live merge conflict path surfaces backend detail", async ({ page, 
   await expect(page.getByText(`Candidate merge action completed for ${primaryCandidate.id}.`)).toHaveCount(0);
 });
 
+test("cockpit live applies operator guardrails for patch transitions and reasoned mutations", async ({
+  page,
+  request,
+}) => {
+  const suffix = uniqueSuffix();
+  const primary = await createDiscoveryAndProcess(
+    request,
+    `live-guardrail-primary-${suffix}`,
+    `live-guardrail-primary-${suffix}`,
+    `Live Guardrail Primary ${suffix}`,
+    true,
+  );
+  const secondary = await createDiscoveryAndProcess(
+    request,
+    `live-guardrail-secondary-${suffix}`,
+    `live-guardrail-secondary-${suffix}`,
+    `Live Guardrail Secondary ${suffix}`,
+    false,
+  );
+  const primaryCandidate = await findCandidateByDiscovery(request, primary.discoveryId);
+  const secondaryCandidate = await findCandidateByDiscovery(request, secondary.discoveryId);
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+
+  const queueFilters = page.locator("article:has(h2:text-is('Candidate Queue Filters'))");
+  await queueFilters.getByLabel("State").selectOption("all");
+  await queueFilters.getByRole("button", { name: "Refresh Candidates" }).click();
+
+  const candidateTable = page.locator("article:has(h2:text-is('Candidate Queue'))");
+  const primaryRow = candidateTable.locator("tbody tr").filter({ hasText: primaryCandidate.id });
+  await expect(primaryRow).toHaveCount(1);
+  await primaryRow.getByRole("button", { name: /Select|Selected/ }).click();
+
+  const actionForms = page.locator("article:has(h2:text-is('Selected Candidate Actions')) form");
+  const patchForm = actionForms.nth(0);
+  const mergeForm = actionForms.nth(1);
+  const overrideForm = actionForms.nth(2);
+
+  const patchStateOptions = await patchForm
+    .getByLabel("State")
+    .locator("option")
+    .evaluateAll((nodes) => nodes.map((node) => (node as HTMLOptionElement).value));
+  expect(patchStateOptions).not.toContain("closed");
+
+  await mergeForm.getByLabel("Secondary Candidate ID").fill(secondaryCandidate.id);
+  const mergeButton = mergeForm.getByRole("button", { name: "Merge Candidate" });
+  await expect(mergeButton).toBeDisabled();
+  await mergeForm.getByLabel("Reason").fill("live guardrail merge reason");
+  await expect(mergeButton).toBeEnabled();
+
+  const overrideButton = overrideForm.getByRole("button", { name: "Apply Override" });
+  await expect(overrideButton).toBeDisabled();
+  await overrideForm.getByLabel("Reason").fill("live guardrail override reason");
+  await expect(overrideButton).toBeEnabled();
+  await overrideForm.getByLabel("Reason").fill("");
+  await expect(overrideButton).toBeDisabled();
+
+  await patchForm.getByLabel("State").selectOption("rejected");
+  const patchButton = patchForm.getByRole("button", { name: "Apply State Patch" });
+  await expect(patchButton).toBeDisabled();
+  await patchForm.getByLabel("Reason").fill("live guardrail patch reason");
+  await expect(patchButton).toBeEnabled();
+  await patchButton.click();
+  await expect(page.getByText(`Candidate patch action completed for ${primaryCandidate.id}.`)).toBeVisible();
+
+  const persistedCandidate = await findCandidateByDiscovery(request, primary.discoveryId);
+  expect(persistedCandidate.state).toBe("rejected");
+});
+
 test("cockpit live backend rejects non-admin and invalid requests", async ({ request }) => {
   const suffix = uniqueSuffix();
   const seeded = await createDiscoveryAndProcess(

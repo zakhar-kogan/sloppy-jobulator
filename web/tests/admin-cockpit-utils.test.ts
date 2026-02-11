@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { encodeAdminQuery, parseAdminCount } from "../lib/admin-cockpit-utils.ts";
+import {
+  canTransitionCandidateState,
+  encodeAdminQuery,
+  listPatchCandidateStates,
+  parseAdminCount
+} from "../lib/admin-cockpit-utils.ts";
 
 test("encodeAdminQuery omits null, undefined, and blank string values", () => {
   const query = encodeAdminQuery({
@@ -33,4 +38,31 @@ test("parseAdminCount returns 0 for invalid payloads", () => {
 
 test("parseAdminCount returns numeric count values", () => {
   assert.equal(parseAdminCount({ count: 7 }), 7);
+});
+
+test("canTransitionCandidateState mirrors backend transition rules", () => {
+  assert.equal(canTransitionCandidateState("needs_review", "publishable"), true);
+  assert.equal(canTransitionCandidateState("needs_review", "closed"), false);
+  assert.equal(canTransitionCandidateState("published", "closed"), true);
+  assert.equal(canTransitionCandidateState("published", "processed"), false);
+  assert.equal(canTransitionCandidateState("archived", "archived"), true);
+});
+
+test("listPatchCandidateStates filters candidate states using transition guardrails", () => {
+  const orderedStates = [
+    "discovered",
+    "processed",
+    "publishable",
+    "published",
+    "rejected",
+    "closed",
+    "archived",
+    "needs_review"
+  ] as const;
+
+  const fromNeedsReview = listPatchCandidateStates("needs_review", orderedStates);
+  assert.deepEqual(fromNeedsReview, ["processed", "publishable", "rejected", "archived", "needs_review"]);
+
+  const fromPublished = listPatchCandidateStates("published", orderedStates);
+  assert.deepEqual(fromPublished, ["published", "closed", "archived"]);
 });
