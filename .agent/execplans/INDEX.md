@@ -22,6 +22,7 @@ For archived plans add:
 
 ## Active ExecPlans
 - `EP-2026-02-08__bootstrap-foundation-v1` — `Status:ACTIVE` — `Created:2026-02-08` — `Updated:2026-02-11` — `Path:.agent/execplans/active/EP-2026-02-08__bootstrap-foundation-v1.md` — `Owner:Codex` — `Summary:Bootstrap runnable API/web/worker/db foundation and harden with DB-backed auth/persistence, CI gates, trust-policy controls, and cockpit/live-E2E operator guardrails.`
+- `EP-2026-02-11__j1-j2-m1-observability-safety` — `Status:ACTIVE` — `Created:2026-02-11` — `Updated:2026-02-11` — `Path:.agent/execplans/active/EP-2026-02-11__j1-j2-m1-observability-safety.md` — `Owner:Codex` — `Summary:Implement J1 OTel instrumentation, J2 dashboards/SLO alerts, and remaining M1 deploy+migration safety gates.`
 
 ## Archived ExecPlans
 - `EP-2026-02-10__g2-freshness-automation` — `Status:ARCHIVED` — `Created:2026-02-10` — `Updated:2026-02-10` — `Archived:2026-02-10` — `Path:.agent/execplans/archive/EP-2026-02-10__g2-freshness-automation.md` — `Owner:Codex` — `Summary:Implemented freshness enqueue automation and machine-driven posting downgrade/archive transitions.` — `Outcome:G2 freshness scheduler + transition baseline shipped with DB-backed tests.`
