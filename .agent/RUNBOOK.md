@@ -22,6 +22,10 @@
 - Fast lane: `api-fast`, `workers`, `web`.
 - DB-backed integration lane: `api-integration-db` (runs `api/tests/test_discovery_jobs_integration.py` with Postgres + schema apply).
 - Branch protection should require: `api-fast`, `api-integration-db`, `workers`, `web`, and `validate-agent-contract`.
+7. Live browser E2E reliability baseline:
+- Install cached browser runtime explicitly before live runs: `fnm exec --using 24.13.0 pnpm --dir web exec playwright install chromium`.
+- Keep live Playwright retries disabled (`web/playwright.live.config.ts` uses `retries: 0`); apply retry-once only at CI step level for transient startup failures.
+- Use explicit timeout budgets for live job setup/run steps and cache `uv`, `pnpm`, and Playwright browser artifacts in CI.
 
 ## Database operations
 1. Migration command: `DATABASE_URL=... bash scripts/apply_db_schema.sh`

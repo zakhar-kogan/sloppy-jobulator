@@ -21,6 +21,9 @@
 18. When reading dynamic JSON payloads in typed worker code, normalize to typed locals first (`raw_payload` -> `dict[str, Any]`) before field access to keep mypy stable.
 19. For policy engines (dedupe/trust/moderation), keep score computation pure and deterministic in dedicated modules, and apply DB side effects (state transitions, merge writes, provenance) in one transactional repository layer.
 20. When multiple policy engines interact, resolve trust-policy publish decisions against the final merge-policy outcome (including fallback decisions) and record source-specific routing receipts (`reason`, moderation route) in provenance.
+21. For queue-like maintenance flows, assert backend state deltas against returned counts (for example `queued_after - queued_before == enqueue_count`) rather than fixed entity IDs when ordering/data may vary.
+22. Keep framework-dependent route wrappers thin and move forwarding/error-shaping logic into framework-agnostic core modules so `node:test` contract coverage can run without runtime adapters.
+23. Prefer scoped retry at CI step/job level for known startup flakes; keep per-test retries disabled for deterministic contract failures.
 
 ## Anti-patterns
 1. Hidden side effects without tests or receipts.

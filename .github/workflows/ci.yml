@@ -36,6 +36,9 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v4
 
+      - name: Install API deps
+        run: pip install -e "./api[dev]"
+
       - name: API lint
         run: ruff check api
 
@@ -136,6 +139,7 @@ jobs:
 
   web-e2e-live:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:16
@@ -156,6 +160,8 @@ jobs:
       SJ_LIVE_E2E_API_URL: http://127.0.0.1:8000
       SJ_LIVE_E2E_WEB_URL: http://127.0.0.1:3002
       SJ_LIVE_E2E_SUPABASE_URL: http://127.0.0.1:54321
+      UV_CACHE_DIR: ~/.cache/uv
+      PLAYWRIGHT_BROWSERS_PATH: /home/runner/.cache/ms-playwright
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -165,17 +171,16 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install API deps
-        run: pip install -e "./api[dev]"
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
 
-      - name: Install Postgres client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
-
-      - name: Wait for Postgres
-        run: until pg_isready -h 127.0.0.1 -p 5432 -U postgres -d sloppy_jobulator_test; do sleep 1; done
-
-      - name: Apply schema and seed
-        run: bash scripts/apply_db_schema.sh
+      - name: Cache uv artifacts
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key: ${{ runner.os }}-uv-${{ hashFiles('api/pyproject.toml', 'api/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -185,8 +190,59 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
+      - name: Configure pnpm store path
+        run: pnpm config set store-dir ~/.pnpm-store
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: ${{ runner.os }}-playwright-${{ hashFiles('web/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
       - name: Install web deps
+        timeout-minutes: 8
         run: pnpm install --dir web --frozen-lockfile
 
-      - name: Web live E2E
-        run: pnpm --dir web test:e2e:live
+      - name: Install Playwright browser
+        timeout-minutes: 8
+        run: pnpm --dir web exec playwright install chromium
+
+      - name: Sync API deps with uv
+        timeout-minutes: 8
+        run: uv sync --project api --extra dev --frozen
+
+      - name: Install Postgres client
+        timeout-minutes: 5
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        timeout-minutes: 2
+        run: until pg_isready -h 127.0.0.1 -p 5432 -U postgres -d sloppy_jobulator_test; do sleep 1; done
+
+      - name: Apply schema and seed
+        timeout-minutes: 3
+        run: bash scripts/apply_db_schema.sh
+
+      - name: Web live E2E (retry once on transient startup flake)
+        timeout-minutes: 20
+        run: |
+          for attempt in 1 2; do
+            echo "web-e2e-live attempt ${attempt}/2"
+            if pnpm --dir web test:e2e:live; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              exit 1
+            fi
+            echo "Retrying web-e2e-live after transient failure..."
+          done

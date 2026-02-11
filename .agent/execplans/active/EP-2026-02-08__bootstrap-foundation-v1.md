@@ -49,6 +49,9 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Wire admin UI (`H2`) trust-policy management flows to `GET/PUT/PATCH /admin/source-trust-policy` via Next.js proxy routes.
 - [x] Expand `H2` with operator cockpit baseline (`/admin/cockpit`) for candidate queue actions (`approve/reject/merge/override`) plus module/job visibility and bounded maintenance mutations via new admin API surfaces.
 - [x] Expand `L1` live cockpit Playwright coverage with negative/authz scenarios (`409` merge conflict surfaced in UI, backend `401` missing bearer, `403` non-admin, `422` invalid payload).
+- [x] Expand `L1` live cockpit persistence assertions for merge/override/module/job actions (candidate events, module mutation timestamps, enqueue/reap job-state transitions).
+- [x] Harden `web-e2e-live` CI runtime with cache-backed dependencies/browsers, scoped retry, and explicit timeout budgets.
+- [x] Add web API contract tests for admin proxy failure mapping (backend `4xx/5xx` passthrough, `limit` bounds pass-through, stable non-JSON error body shape).
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
@@ -80,6 +83,10 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-10: Added admin module/job API endpoints (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) plus `/admin/cockpit` UI and proxy routes for candidate queue actions and operator maintenance flows.
 - 2026-02-10: Added web-side API-contract tests (`node:test`) for cockpit query serialization and proxy-path builders, wired as `pnpm --dir web test:contracts`.
 - 2026-02-10: Added live cockpit negative/authz coverage in Playwright (`web/tests-e2e/admin-cockpit.live.spec.ts`) for merge-conflict error rendering and backend `401/403/422` contracts.
+- 2026-02-10: Expanded live cockpit persistence assertions in Playwright to assert candidate provenance events (`merge_applied`, `merged_away`, `state_overridden`), module toggle `updated_at` progression, and enqueue/reap job ledger transitions.
+- 2026-02-10: Hardened `.github/workflows/ci.yml` `web-e2e-live` with uv/pnpm/Playwright caching, explicit timeout budgets, and single-step retry-once logic for transient E2E startup failures.
+- 2026-02-10: Switched `web/playwright.live.config.ts` to cached Chromium (`channel` removed), set CI `globalTimeout` budget, and disabled blanket CI per-test retries in favor of scoped job-step retry.
+- 2026-02-10: Added `web/tests/admin-proxy-failure-mapping.test.ts` contracts and extracted `web/lib/admin-api-core.ts` so admin proxy passthrough/error-shape behavior is verified in `node:test` without Next runtime imports.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -112,5 +119,4 @@ Bootstrap this repository into a real project implementation using the handoff s
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
 1. Keep full moderation/admin E2E coverage under `L1` as the primary remaining validation gap.
-2. Expand live persistence assertions for cockpit actions beyond current candidate/posting/module checks.
-3. Harden `web-e2e-live` CI runtime (cache + bounded retries + timeout budgets) and add admin proxy failure-mapping contract tests.
+2. Open PR with `docs/roadmap/L1_E2E_PR_SUMMARY_2026-02-11.md` and continue L1 full E2E scope expansion.

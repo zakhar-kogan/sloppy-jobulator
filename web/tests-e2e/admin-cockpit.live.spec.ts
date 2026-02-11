@@ -39,17 +39,44 @@ type Candidate = {
   posting_id: string | null;
 };
 
+type CandidateEvent = {
+  id: number;
+  entity_type: string;
+  entity_id: string | null;
+  event_type: string;
+  actor_type: string;
+  actor_id: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
+type AdminModule = {
+  id: string;
+  module_id: string;
+  enabled: boolean;
+  updated_at: string;
+};
+
+type AdminJob = {
+  id: string;
+  kind: string;
+  status: string;
+  target_type: string;
+  target_id: string | null;
+  locked_by_module_id: string | null;
+  lease_expires_at: string | null;
+};
+
 function uniqueSuffix(): string {
   return `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 }
 
-async function createDiscoveryAndProcess(
+async function createDiscovery(
   request: import("@playwright/test").APIRequestContext,
   externalId: string,
   canonicalSlug: string,
   title: string,
-  includePosting: boolean,
-): Promise<{ discoveryId: string; candidateHash: string }> {
+): Promise<DiscoveryAccepted> {
   const discoveredAt = new Date().toISOString();
   const discoveryResp = await request.post(`${API_BASE_URL}/discoveries`, {
     headers: CONNECTOR_HEADERS,
@@ -64,7 +91,17 @@ async function createDiscoveryAndProcess(
     },
   });
   expect(discoveryResp.ok()).toBeTruthy();
-  const discovery = (await discoveryResp.json()) as DiscoveryAccepted;
+  return (await discoveryResp.json()) as DiscoveryAccepted;
+}
+
+async function createDiscoveryAndProcess(
+  request: import("@playwright/test").APIRequestContext,
+  externalId: string,
+  canonicalSlug: string,
+  title: string,
+  includePosting: boolean,
+): Promise<{ discoveryId: string; candidateHash: string }> {
+  const discovery = await createDiscovery(request, externalId, canonicalSlug, title);
 
   const jobsResp = await request.get(`${API_BASE_URL}/jobs`, { headers: PROCESSOR_HEADERS });
   expect(jobsResp.ok()).toBeTruthy();
@@ -134,6 +171,58 @@ async function findCandidateByDiscovery(
   return candidate;
 }
 
+async function listCandidateEvents(
+  request: import("@playwright/test").APIRequestContext,
+  candidateId: string,
+  query = "limit=200",
+): Promise<CandidateEvent[]> {
+  const response = await request.get(`${API_BASE_URL}/candidates/${candidateId}/events?${query}`, {
+    headers: ADMIN_HEADERS,
+  });
+  if (!response.ok()) {
+    throw new Error(`candidate events request failed (${response.status()}): ${await response.text()}`);
+  }
+  return (await response.json()) as CandidateEvent[];
+}
+
+async function listAdminModules(
+  request: import("@playwright/test").APIRequestContext,
+  query = "limit=50",
+): Promise<AdminModule[]> {
+  const response = await request.get(`${API_BASE_URL}/admin/modules?${query}`, {
+    headers: ADMIN_HEADERS,
+  });
+  if (!response.ok()) {
+    throw new Error(`modules request failed (${response.status()}): ${await response.text()}`);
+  }
+  return (await response.json()) as AdminModule[];
+}
+
+async function getAdminModule(
+  request: import("@playwright/test").APIRequestContext,
+  moduleId: string,
+): Promise<AdminModule> {
+  const modules = await listAdminModules(request, `module_id=${encodeURIComponent(moduleId)}&limit=5`);
+  const module = modules.find((row) => row.module_id === moduleId);
+  if (!module) {
+    throw new Error(`module ${moduleId} not found`);
+  }
+  return module;
+}
+
+async function listAdminJobs(
+  request: import("@playwright/test").APIRequestContext,
+  query = "limit=200",
+): Promise<AdminJob[]> {
+  const response = await request.get(`${API_BASE_URL}/admin/jobs?${query}`, {
+    headers: ADMIN_HEADERS,
+  });
+  if (!response.ok()) {
+    throw new Error(`admin jobs request failed (${response.status()}): ${await response.text()}`);
+  }
+  return (await response.json()) as AdminJob[];
+}
+
 test("cockpit live flow persists merge, moderation, module toggles, and posting override status", async ({
   page,
   request,
@@ -157,6 +246,8 @@ test("cockpit live flow persists merge, moderation, module toggles, and posting 
   const primaryCandidate = await findCandidateByDiscovery(request, primary.discoveryId);
   const secondaryCandidate = await findCandidateByDiscovery(request, secondary.discoveryId);
   expect(primaryCandidate!.id).not.toEqual(secondaryCandidate!.id);
+  const moduleBeforeToggle = await getAdminModule(request, "local-processor");
+  const moduleBeforeToggleUpdatedAt = Date.parse(moduleBeforeToggle.updated_at);
 
   await page.goto("/admin/cockpit");
   await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
@@ -195,21 +286,94 @@ test("cockpit live flow persists merge, moderation, module toggles, and posting 
   await overrideForm.getByRole("button", { name: "Apply Override" }).click();
   await expect(page.getByText(`Candidate override action completed for ${primaryCandidate!.id}.`)).toBeVisible();
 
+  const primaryEvents = await listCandidateEvents(request, primaryCandidate.id);
+  const primaryMergeEvent = primaryEvents.find((event) => event.event_type === "merge_applied");
+  expect(primaryMergeEvent).toBeDefined();
+  expect(primaryMergeEvent!.payload.secondary_candidate_id).toBe(secondaryCandidate.id);
+  const primaryOverrideEvent = primaryEvents.find((event) => event.event_type === "state_overridden");
+  expect(primaryOverrideEvent).toBeDefined();
+  expect(primaryOverrideEvent!.payload.candidate_state).toBe("rejected");
+  expect(primaryOverrideEvent!.payload.posting_status).toBe("archived");
+
+  const secondaryEvents = await listCandidateEvents(request, secondaryCandidate.id);
+  const secondaryMergedAwayEvent = secondaryEvents.find((event) => event.event_type === "merged_away");
+  expect(secondaryMergedAwayEvent).toBeDefined();
+  expect(secondaryMergedAwayEvent!.payload.primary_candidate_id).toBe(primaryCandidate.id);
+
   const modulesTable = page.locator("article:has(h2:text-is('Modules Table'))");
   const processorRow = modulesTable.locator("tbody tr").filter({ hasText: "local-processor" });
   await expect(processorRow).toHaveCount(1);
 
   await processorRow.getByRole("button", { name: "Disable" }).click();
   await expect(page.getByText("Updated local-processor enabled=false.")).toBeVisible();
+  const moduleAfterDisable = await getAdminModule(request, "local-processor");
+  expect(moduleAfterDisable.enabled).toBe(false);
+  expect(Date.parse(moduleAfterDisable.updated_at)).toBeGreaterThanOrEqual(moduleBeforeToggleUpdatedAt);
 
   await processorRow.getByRole("button", { name: "Enable" }).click();
   await expect(page.getByText("Updated local-processor enabled=true.")).toBeVisible();
+  const moduleAfterEnable = await getAdminModule(request, "local-processor");
+  expect(moduleAfterEnable.enabled).toBe(true);
+  expect(Date.parse(moduleAfterEnable.updated_at)).toBeGreaterThanOrEqual(Date.parse(moduleAfterDisable.updated_at));
+
+  await createDiscoveryAndProcess(
+    request,
+    `live-freshness-seed-${suffix}`,
+    `live-freshness-seed-${suffix}`,
+    `Live Freshness Seed ${suffix}`,
+    true,
+  );
+
+  const queuedFreshnessJobsBefore = await listAdminJobs(request, "status=queued&kind=check_freshness&limit=200");
+  const queuedFreshnessJobIdsBefore = new Set(queuedFreshnessJobsBefore.map((job) => job.id));
+  const maintenanceLimitInput = page.getByLabel("Maintenance Limit");
+  await expect(maintenanceLimitInput).toBeVisible();
+  await maintenanceLimitInput.fill("1");
 
   await page.getByRole("button", { name: "Enqueue Freshness" }).click();
-  await expect(page.getByText(/Enqueued \d+ freshness jobs\./)).toBeVisible();
+  const enqueueStatus = page.getByText(/Enqueued \d+ freshness jobs\./).first();
+  await expect(enqueueStatus).toBeVisible();
+  const enqueueMessage = await enqueueStatus.innerText();
+  const enqueueCountMatch = enqueueMessage.match(/Enqueued (\d+) freshness jobs\./);
+  expect(enqueueCountMatch).toBeTruthy();
+  const enqueueCount = Number(enqueueCountMatch![1]);
+  const queuedFreshnessJobsAfter = await listAdminJobs(request, "status=queued&kind=check_freshness&limit=200");
+  const newQueuedFreshnessJobs = queuedFreshnessJobsAfter.filter((job) => !queuedFreshnessJobIdsBefore.has(job.id));
+  expect(newQueuedFreshnessJobs.length).toBe(enqueueCount);
+
+  const reaperSeed = await createDiscovery(
+    request,
+    `live-reap-seed-${suffix}`,
+    `live-reap-seed-${suffix}`,
+    `Live Reap Seed ${suffix}`,
+  );
+  const pendingJobsResp = await request.get(`${API_BASE_URL}/jobs`, { headers: PROCESSOR_HEADERS });
+  expect(pendingJobsResp.ok()).toBeTruthy();
+  const pendingJobs = (await pendingJobsResp.json()) as Job[];
+  const expiringJob = pendingJobs.find(
+    (job) => job.target_id === reaperSeed.discovery_id && job.status === "queued",
+  );
+  expect(expiringJob).toBeDefined();
+
+  const expiringClaimResp = await request.post(`${API_BASE_URL}/jobs/${expiringJob!.id}/claim`, {
+    headers: PROCESSOR_HEADERS,
+    data: { lease_seconds: 1 },
+  });
+  expect(expiringClaimResp.ok()).toBeTruthy();
+
+  await page.waitForTimeout(1500);
+  const claimedJobsBeforeReap = await listAdminJobs(request, "status=claimed&limit=200");
+  expect(claimedJobsBeforeReap.some((job) => job.id === expiringJob!.id)).toBeTruthy();
 
   await page.getByRole("button", { name: "Reap Expired" }).click();
   await expect(page.getByText(/Requeued \d+ expired claimed jobs\./)).toBeVisible();
+  const claimedJobsAfterReap = await listAdminJobs(request, "status=claimed&limit=200");
+  expect(claimedJobsAfterReap.some((job) => job.id === expiringJob!.id)).toBeFalsy();
+  const queuedJobsAfterReap = await listAdminJobs(request, "status=queued&limit=200");
+  const requeuedExpiredJob = queuedJobsAfterReap.find((job) => job.id === expiringJob!.id);
+  expect(requeuedExpiredJob).toBeDefined();
+  expect(requeuedExpiredJob!.locked_by_module_id).toBeNull();
+  expect(requeuedExpiredJob!.lease_expires_at).toBeNull();
 
   const rejectedResp = await request.get(`${API_BASE_URL}/candidates?state=rejected&limit=100`, {
     headers: ADMIN_HEADERS,
@@ -227,14 +391,8 @@ test("cockpit live flow persists merge, moderation, module toggles, and posting 
   const posting = (await postingResp.json()) as { status: string };
   expect(posting.status).toBe("archived");
 
-  const moduleResp = await request.get(`${API_BASE_URL}/admin/modules?module_id=local-processor&limit=5`, {
-    headers: ADMIN_HEADERS,
-  });
-  expect(moduleResp.ok()).toBeTruthy();
-  const moduleRows = (await moduleResp.json()) as Array<{ module_id: string; enabled: boolean }>;
-  const processor = moduleRows.find((row) => row.module_id === "local-processor");
-  expect(processor).toBeDefined();
-  expect(processor!.enabled).toBe(true);
+  const finalProcessorModule = await getAdminModule(request, "local-processor");
+  expect(finalProcessorModule.enabled).toBe(true);
 });
 
 test("cockpit live merge conflict path surfaces backend detail", async ({ page, request }) => {
