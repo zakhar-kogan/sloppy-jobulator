@@ -8,18 +8,18 @@ const databaseUrl = process.env.SJ_DATABASE_URL ?? process.env.DATABASE_URL ?? "
 export default defineConfig({
   testDir: "./tests-e2e",
   testMatch: "**/*.live.spec.ts",
+  globalTimeout: process.env.CI ? 15 * 60_000 : undefined,
   timeout: 120_000,
   expect: {
     timeout: 15_000
   },
   forbidOnly: Boolean(process.env.CI),
-  retries: process.env.CI ? 1 : 0,
+  retries: 0,
   workers: 1,
   reporter: "list",
   use: {
     baseURL: webUrl,
-    trace: "retain-on-failure",
-    channel: "chrome"
+    trace: "retain-on-failure"
   },
   webServer: [
     {
