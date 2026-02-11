@@ -36,6 +36,9 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v4
 
+      - name: Install API deps
+        run: pip install -e "./api[dev]"
+
       - name: API lint
         run: ruff check api
 
@@ -183,11 +186,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: ".node-version"
-          cache: "pnpm"
-          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Enable Corepack
         run: corepack enable
+
+      - name: Configure pnpm store path
+        run: pnpm config set store-dir ~/.pnpm-store
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
