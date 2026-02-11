@@ -26,8 +26,6 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[CODE]` Added admin operator cockpit baseline: new admin API module/job endpoints with provenance-backed safe mutations, Next.js `/admin/cockpit` candidate action workflows, and server proxy routes for candidates/modules/jobs operations.
 - 2026-02-10 `[CODE]` Added web-side API-contract tests (`node:test`) for cockpit query encoding and admin proxy route path builders; wired `pnpm --dir web test:contracts`.
 - 2026-02-10 `[CODE]` Added Playwright browser automation (`web/tests-e2e/admin-cockpit.spec.ts`) and config/scripts (`web/playwright.config.ts`, `pnpm --dir web test:e2e`) for mock-backed cockpit merge/patch/override + module/job operator flows.
-- 2026-02-10 `[CODE]` Added live backend Playwright cockpit coverage (`web/tests-e2e/admin-cockpit.live.spec.ts`, `web/playwright.live.config.ts`, `scripts/mock_supabase_auth.py`) and CI job wiring (`web-e2e-live` in `.github/workflows/ci.yml`).
-- 2026-02-10 `[CODE]` Expanded live backend Playwright cockpit coverage with negative/authz assertions: merge conflict error rendering plus backend `401` missing bearer, `403` non-admin, and `422` invalid payload contracts.
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
@@ -41,7 +39,6 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-11 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -> UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live -> make db-down` passed (`39/39` integration, `4/4` live E2E).
 - 2026-02-11 `[TOOL]` `(escalated) uv lock --project api` refreshed `api/uv.lock` for OTel deps.
 - 2026-02-11 `[TOOL]` `uv run --project api --extra dev ruff check api workers -> mypy api/app -> (workdir workers) uv run --project ../api --extra dev mypy app -> pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py -> uv run --project workers --extra dev pytest workers/tests -> bash scripts/agent-hygiene-check.sh --mode project` passed.
-- 2026-02-10 `[TOOL]` `python -m compileall api/app workers/app` passed.
 - 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/app/api/router.py api/app/api/routes/admin.py api/app/schemas/admin.py api/app/services/repository.py api/tests/test_discovery_jobs_integration.py` passed.
 - 2026-02-10 `[TOOL]` `uv run --project api --extra dev mypy api/app` passed.
 - 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> (escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "admin_modules_list_and_toggle_enabled or admin_modules_requires_admin_scope or admin_jobs_visibility_and_safe_mutations or admin_jobs_requires_admin_scope" -> make db-down` passed (`4/4` selected).
@@ -59,5 +56,3 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[TOOL]` `(escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live` passed (`3/3`) after adding expanded live persistence assertions.
 - 2026-02-10 `[TOOL]` `fnm exec --using 24.13.0 pnpm --dir web typecheck -> pnpm --dir web exec playwright test -c playwright.live.config.ts --list -> bash scripts/agent-hygiene-check.sh --mode project` passed after CI/runtime hardening edits.
 - 2026-02-10 `[TOOL]` `(escalated) fnm exec --using 24.13.0 pnpm --dir web exec playwright install chromium -> (escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live` passed (`3/3`) after switching live config to cached Chromium + zero per-test retries.
-- 2026-02-10 `[TOOL]` `fnm exec --using 24.13.0 pnpm --dir web test:contracts -> typecheck -> bash scripts/agent-hygiene-check.sh --mode project` passed after admin proxy failure-mapping contract additions.
-- 2026-02-10 `[TOOL]` `(escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live` passed (`3/3`) after admin proxy-core refactor.
