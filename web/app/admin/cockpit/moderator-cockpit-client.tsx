@@ -17,6 +17,7 @@ import {
 } from "../../../lib/admin-cockpit";
 import {
   canTransitionCandidateState,
+  coerceBoundedInteger,
   encodeAdminQuery,
   listPatchCandidateStates,
   parseAdminCount
@@ -36,6 +37,10 @@ const MODULE_KINDS: ModuleKind[] = ["connector", "processor"];
 const JOB_KINDS: JobKind[] = ["dedupe", "extract", "enrich", "check_freshness", "resolve_url_redirects"];
 const JOB_STATUSES: JobStatus[] = ["queued", "claimed", "done", "failed", "dead_letter"];
 const POSTING_STATUSES: PostingStatus[] = ["active", "stale", "archived", "closed"];
+const CANDIDATE_LIMIT_MAX = 100;
+const MODULE_LIMIT_MAX = 200;
+const JOB_LIMIT_MAX = 200;
+const MAINTENANCE_LIMIT_MAX = 1000;
 
 type BoolFilter = "all" | "true" | "false";
 type CandidateStateFilter = "all" | CandidateState;
@@ -448,10 +453,18 @@ export function ModeratorCockpitClient(): JSX.Element {
             <span>Limit</span>
             <input
               value={candidateLimit}
-              onChange={(event) => setCandidateLimit(Math.max(1, Number(event.target.value) || 1))}
+              onChange={(event) =>
+                setCandidateLimit(
+                  coerceBoundedInteger(event.target.value, {
+                    min: 1,
+                    max: CANDIDATE_LIMIT_MAX,
+                    fallback: candidateLimit
+                  })
+                )
+              }
               type="number"
               min={1}
-              max={100}
+              max={CANDIDATE_LIMIT_MAX}
             />
           </label>
 
@@ -673,10 +686,18 @@ export function ModeratorCockpitClient(): JSX.Element {
             <span>Limit</span>
             <input
               value={moduleLimit}
-              onChange={(event) => setModuleLimit(Math.max(1, Number(event.target.value) || 1))}
+              onChange={(event) =>
+                setModuleLimit(
+                  coerceBoundedInteger(event.target.value, {
+                    min: 1,
+                    max: MODULE_LIMIT_MAX,
+                    fallback: moduleLimit
+                  })
+                )
+              }
               type="number"
               min={1}
-              max={200}
+              max={MODULE_LIMIT_MAX}
             />
           </label>
 
@@ -736,10 +757,18 @@ export function ModeratorCockpitClient(): JSX.Element {
             <span>Limit</span>
             <input
               value={jobLimit}
-              onChange={(event) => setJobLimit(Math.max(1, Number(event.target.value) || 1))}
+              onChange={(event) =>
+                setJobLimit(
+                  coerceBoundedInteger(event.target.value, {
+                    min: 1,
+                    max: JOB_LIMIT_MAX,
+                    fallback: jobLimit
+                  })
+                )
+              }
               type="number"
               min={1}
-              max={200}
+              max={JOB_LIMIT_MAX}
             />
           </label>
 
@@ -757,10 +786,18 @@ export function ModeratorCockpitClient(): JSX.Element {
             <span>Maintenance Limit</span>
             <input
               value={maintenanceLimit}
-              onChange={(event) => setMaintenanceLimit(Math.max(1, Number(event.target.value) || 1))}
+              onChange={(event) =>
+                setMaintenanceLimit(
+                  coerceBoundedInteger(event.target.value, {
+                    min: 1,
+                    max: MAINTENANCE_LIMIT_MAX,
+                    fallback: maintenanceLimit
+                  })
+                )
+              }
               type="number"
               min={1}
-              max={1000}
+              max={MAINTENANCE_LIMIT_MAX}
             />
           </label>
         </div>

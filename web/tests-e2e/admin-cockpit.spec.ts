@@ -459,3 +459,53 @@ test("merge and override actions require reason before submit", async ({ page })
   await expect(page.getByText(`Candidate override action completed for ${PRIMARY_CANDIDATE_ID}.`)).toBeVisible();
   expect(overrideCalls).toBe(1);
 });
+
+test("cockpit clamps filter and maintenance limits to backend contract bounds", async ({ page }) => {
+  const startedAt = "2026-02-10T20:02:39.338252Z";
+  const candidate: CandidateRecord = {
+    id: PRIMARY_CANDIDATE_ID,
+    state: "needs_review",
+    dedupe_confidence: 0.91,
+    risk_flags: ["manual_review_needed"],
+    extracted_fields: { title: "E2E Primary Candidate" },
+    discovery_ids: ["c0315d98-ef37-49a3-b7ba-1cae768c8964"],
+    posting_id: POSTING_ID,
+    created_at: startedAt,
+    updated_at: startedAt
+  };
+
+  const candidatesQueries: string[] = [];
+  const enqueueQueries: string[] = [];
+
+  await page.route(/\/api\/admin\/candidates(?:\?.*)?$/, async (route) => {
+    const url = new URL(route.request().url());
+    candidatesQueries.push(url.searchParams.toString());
+    return jsonResponse(route, [candidate]);
+  });
+  await page.route(/\/api\/admin\/modules(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+  await page.route(/\/api\/admin\/jobs(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+  await page.route(/\/api\/admin\/jobs\/enqueue-freshness(?:\?.*)?$/, async (route) => {
+    const url = new URL(route.request().url());
+    enqueueQueries.push(url.searchParams.toString());
+    return jsonResponse(route, { count: 0 });
+  });
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+
+  const candidateFilters = page.locator("article:has(h2:text-is('Candidate Queue Filters'))");
+  await candidateFilters.getByLabel("Limit").fill("999");
+  await candidateFilters.getByRole("button", { name: "Refresh Candidates" }).click();
+  await expect(page.getByText(`${PRIMARY_CANDIDATE_ID} (needs_review)`)).toBeVisible();
+
+  const lastCandidatesQuery = candidatesQueries.at(-1) ?? "";
+  expect(lastCandidatesQuery).toContain("limit=100");
+
+  const jobsPanel = page.locator("article:has(h2:text-is('Jobs'))");
+  await jobsPanel.getByLabel("Maintenance Limit").fill("5000");
+  await jobsPanel.getByRole("button", { name: "Enqueue Freshness" }).click();
+  await expect(page.getByText("Enqueued 0 freshness jobs.")).toBeVisible();
+
+  const lastEnqueueQuery = enqueueQueries.at(-1) ?? "";
+  expect(lastEnqueueQuery).toContain("limit=1000");
+});

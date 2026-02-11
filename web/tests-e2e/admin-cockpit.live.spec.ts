@@ -287,6 +287,12 @@ test("cockpit live flow persists merge, moderation, module toggles, and posting 
   await expect(page.getByText(`Candidate override action completed for ${primaryCandidate!.id}.`)).toBeVisible();
 
   const primaryEvents = await listCandidateEvents(request, primaryCandidate.id);
+  const primaryPatchEvent = primaryEvents.find((event) => event.event_type === "state_changed");
+  expect(primaryPatchEvent).toBeDefined();
+  expect(primaryPatchEvent!.payload.from_state).toBe("needs_review");
+  expect(primaryPatchEvent!.payload.to_state).toBe("publishable");
+  expect(primaryPatchEvent!.payload.reason).toBe("live patch validation");
+
   const primaryMergeEvent = primaryEvents.find((event) => event.event_type === "merge_applied");
   expect(primaryMergeEvent).toBeDefined();
   expect(primaryMergeEvent!.payload.secondary_candidate_id).toBe(secondaryCandidate.id);
@@ -427,6 +433,7 @@ test("cockpit live merge conflict path surfaces backend detail", async ({ page, 
   const primaryRow = candidateTable.locator("tbody tr").filter({ hasText: primaryCandidate.id });
   await expect(primaryRow).toHaveCount(1);
   await primaryRow.getByRole("button", { name: /Select|Selected/ }).click();
+  await expect(page.locator("article:has(h2:text-is('Selected Candidate Actions'))")).toContainText(primaryCandidate.id);
 
   const mergeForm = page.locator("article:has(h2:text-is('Selected Candidate Actions')) form").nth(1);
   await mergeForm.getByLabel("Secondary Candidate ID").fill(secondaryCandidate.id);
@@ -435,6 +442,9 @@ test("cockpit live merge conflict path surfaces backend detail", async ({ page, 
 
   await expect(page.getByText("cannot merge candidates that both already have postings")).toBeVisible();
   await expect(page.getByText(`Candidate merge action completed for ${primaryCandidate.id}.`)).toHaveCount(0);
+
+  const primaryEvents = await listCandidateEvents(request, primaryCandidate.id);
+  expect(primaryEvents.some((event) => event.event_type === "merge_applied")).toBeFalsy();
 });
 
 test("cockpit live applies operator guardrails for patch transitions and reasoned mutations", async ({
@@ -495,16 +505,20 @@ test("cockpit live applies operator guardrails for patch transitions and reasone
   await overrideForm.getByLabel("Reason").fill("");
   await expect(overrideButton).toBeDisabled();
 
+  await primaryRow.getByRole("button", { name: /Select|Selected/ }).click();
+  await expect(page.locator("article:has(h2:text-is('Selected Candidate Actions'))")).toContainText(primaryCandidate.id);
   await patchForm.getByLabel("State").selectOption("rejected");
   const patchButton = patchForm.getByRole("button", { name: "Apply State Patch" });
   await expect(patchButton).toBeDisabled();
   await patchForm.getByLabel("Reason").fill("live guardrail patch reason");
   await expect(patchButton).toBeEnabled();
   await patchButton.click();
-  await expect(page.getByText(`Candidate patch action completed for ${primaryCandidate.id}.`)).toBeVisible();
-
-  const persistedCandidate = await findCandidateByDiscovery(request, primary.discoveryId);
-  expect(persistedCandidate.state).toBe("rejected");
+  await expect
+    .poll(async () => {
+      const persistedCandidate = await findCandidateByDiscovery(request, primary.discoveryId);
+      return persistedCandidate.state;
+    })
+    .toBe("rejected");
 });
 
 test("cockpit live backend rejects non-admin and invalid requests", async ({ request }) => {
