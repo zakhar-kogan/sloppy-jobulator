@@ -15,7 +15,12 @@ import {
   type ModuleKind,
   type PostingStatus
 } from "../../../lib/admin-cockpit";
-import { encodeAdminQuery, parseAdminCount } from "../../../lib/admin-cockpit-utils";
+import {
+  canTransitionCandidateState,
+  encodeAdminQuery,
+  listPatchCandidateStates,
+  parseAdminCount
+} from "../../../lib/admin-cockpit-utils";
 
 const CANDIDATE_STATES: CandidateState[] = [
   "discovered",
@@ -39,6 +44,12 @@ type JobKindFilter = "all" | JobKind;
 type JobStatusFilter = "all" | JobStatus;
 
 type CandidateAction = "patch" | "merge" | "override";
+
+const PATCH_REASON_REQUIRED_STATES = new Set<CandidateState>(["rejected", "archived", "closed"]);
+
+function requiresPatchReason(state: CandidateState): boolean {
+  return PATCH_REASON_REQUIRED_STATES.has(state);
+}
 
 export function ModeratorCockpitClient(): JSX.Element {
   const [candidateStateFilter, setCandidateStateFilter] = useState<CandidateStateFilter>("needs_review");
@@ -121,6 +132,23 @@ export function ModeratorCockpitClient(): JSX.Element {
     () => candidates.find((candidate) => candidate.id === selectedCandidateId) ?? null,
     [candidates, selectedCandidateId]
   );
+  const patchStateOptions = useMemo(
+    () => listPatchCandidateStates(selectedCandidate?.state ?? null, CANDIDATE_STATES),
+    [selectedCandidate]
+  );
+  const mergeCandidateOptions = useMemo(
+    () => candidates.filter((candidate) => candidate.id !== selectedCandidateId),
+    [candidates, selectedCandidateId]
+  );
+  const patchSubmitDisabled =
+    candidateActionBusy !== null || !selectedCandidateId || (requiresPatchReason(patchState) && patchReason.trim().length === 0);
+  const mergeSubmitDisabled =
+    candidateActionBusy !== null ||
+    !selectedCandidateId ||
+    mergeSecondaryCandidateId.trim().length === 0 ||
+    mergeReason.trim().length === 0;
+  const overrideSubmitDisabled =
+    candidateActionBusy !== null || !selectedCandidateId || overrideReason.trim().length === 0;
 
   const loadCandidates = useCallback(async () => {
     setCandidateListLoading(true);
@@ -222,6 +250,12 @@ export function ModeratorCockpitClient(): JSX.Element {
     void loadJobs();
   }, [loadJobs]);
 
+  useEffect(() => {
+    if (!patchStateOptions.includes(patchState)) {
+      setPatchState(patchStateOptions[0] ?? "needs_review");
+    }
+  }, [patchState, patchStateOptions]);
+
   async function runCandidateAction(action: CandidateAction, body: Record<string, unknown>): Promise<void> {
     if (!selectedCandidateId) {
       setCandidateActionError("Select a candidate first.");
@@ -255,6 +289,11 @@ export function ModeratorCockpitClient(): JSX.Element {
       if (action === "merge") {
         setMergeSecondaryCandidateId("");
         setMergeReason("");
+      } else if (action === "patch") {
+        setPatchReason("");
+      } else if (action === "override") {
+        setOverrideReason("");
+        setOverridePostingStatus("");
       }
       setCandidateMessage(`Candidate ${action} action completed for ${selectedCandidateId}.`);
       await loadCandidates();
@@ -268,9 +307,25 @@ export function ModeratorCockpitClient(): JSX.Element {
 
   async function handlePatch(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if (!selectedCandidate) {
+      setCandidateActionError("Select a candidate first.");
+      return;
+    }
+
+    if (!canTransitionCandidateState(selectedCandidate.state, patchState)) {
+      setCandidateActionError(`invalid state transition for patch: ${selectedCandidate.state} -> ${patchState}`);
+      return;
+    }
+
+    const reason = patchReason.trim();
+    if (requiresPatchReason(patchState) && reason.length === 0) {
+      setCandidateActionError(`reason is required when patching candidate to ${patchState}.`);
+      return;
+    }
+
     await runCandidateAction("patch", {
       state: patchState,
-      reason: patchReason.trim() || undefined
+      reason: reason || undefined
     });
   }
 
@@ -285,18 +340,28 @@ export function ModeratorCockpitClient(): JSX.Element {
       setCandidateActionError("secondary_candidate_id must differ from selected candidate.");
       return;
     }
+    const reason = mergeReason.trim();
+    if (!reason) {
+      setCandidateActionError("reason is required for merge.");
+      return;
+    }
 
     await runCandidateAction("merge", {
       secondary_candidate_id: secondaryCandidateId,
-      reason: mergeReason.trim() || undefined
+      reason
     });
   }
 
   async function handleOverride(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    const reason = overrideReason.trim();
+    if (!reason) {
+      setCandidateActionError("reason is required for override.");
+      return;
+    }
     await runCandidateAction("override", {
       state: overrideState,
-      reason: overrideReason.trim() || undefined,
+      reason,
       posting_status: overridePostingStatus || undefined
     });
   }
@@ -425,28 +490,47 @@ export function ModeratorCockpitClient(): JSX.Element {
           <label className="control">
             <span>State</span>
             <select value={patchState} onChange={(event) => setPatchState(event.target.value as CandidateState)}>
-              {CANDIDATE_STATES.map((option) => (
+              {patchStateOptions.map((option) => (
                 <option key={option} value={option}>
                   {option}
                 </option>
               ))}
             </select>
           </label>
+          {selectedCandidate ? (
+            <p className="status">
+              Patch transitions from <code>{selectedCandidate.state}</code>: {patchStateOptions.join(", ")}.
+            </p>
+          ) : null}
           <label className="control">
             <span>Reason</span>
             <input
               value={patchReason}
               onChange={(event) => setPatchReason(event.target.value)}
-              placeholder="Optional state-change reason"
+              placeholder={requiresPatchReason(patchState) ? "Required for rejected/archived/closed" : "Optional state-change reason"}
             />
           </label>
-          <button className="button" type="submit" disabled={candidateActionBusy !== null || !selectedCandidateId}>
+          <button className="button" type="submit" disabled={patchSubmitDisabled}>
             {candidateActionBusy === "patch" ? "Applying…" : "Apply State Patch"}
           </button>
         </form>
 
         <form className="stack" onSubmit={(event) => void handleMerge(event)}>
           <h3 className="small-heading">Merge</h3>
+          <label className="control">
+            <span>Quick Pick Candidate</span>
+            <select
+              value={mergeCandidateOptions.some((candidate) => candidate.id === mergeSecondaryCandidateId) ? mergeSecondaryCandidateId : ""}
+              onChange={(event) => setMergeSecondaryCandidateId(event.target.value)}
+            >
+              <option value="">manual entry</option>
+              {mergeCandidateOptions.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {coerceTitle(candidate.extracted_fields)} ({candidate.state})
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="control">
             <span>Secondary Candidate ID</span>
             <input
@@ -460,10 +544,10 @@ export function ModeratorCockpitClient(): JSX.Element {
             <input
               value={mergeReason}
               onChange={(event) => setMergeReason(event.target.value)}
-              placeholder="Optional merge reason"
+              placeholder="Required merge reason"
             />
           </label>
-          <button className="button" type="submit" disabled={candidateActionBusy !== null || !selectedCandidateId}>
+          <button className="button" type="submit" disabled={mergeSubmitDisabled}>
             {candidateActionBusy === "merge" ? "Merging…" : "Merge Candidate"}
           </button>
         </form>
@@ -499,10 +583,10 @@ export function ModeratorCockpitClient(): JSX.Element {
             <input
               value={overrideReason}
               onChange={(event) => setOverrideReason(event.target.value)}
-              placeholder="Override reason"
+              placeholder="Required override reason"
             />
           </label>
-          <button className="button" type="submit" disabled={candidateActionBusy !== null || !selectedCandidateId}>
+          <button className="button" type="submit" disabled={overrideSubmitDisabled}>
             {candidateActionBusy === "override" ? "Overriding…" : "Apply Override"}
           </button>
         </form>

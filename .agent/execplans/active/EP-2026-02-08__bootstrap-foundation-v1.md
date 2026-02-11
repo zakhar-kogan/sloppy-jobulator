@@ -3,7 +3,7 @@
 ## Metadata
 - Status: `ACTIVE`
 - Created: `2026-02-08`
-- Updated: `2026-02-10`
+- Updated: `2026-02-11`
 - Owner: `Codex`
 
 ## Purpose / Big Picture
@@ -52,6 +52,8 @@ Bootstrap this repository into a real project implementation using the handoff s
 - [x] Expand `L1` live cockpit persistence assertions for merge/override/module/job actions (candidate events, module mutation timestamps, enqueue/reap job-state transitions).
 - [x] Harden `web-e2e-live` CI runtime with cache-backed dependencies/browsers, scoped retry, and explicit timeout budgets.
 - [x] Add web API contract tests for admin proxy failure mapping (backend `4xx/5xx` passthrough, `limit` bounds pass-through, stable non-JSON error body shape).
+- [x] Harden `H2` cockpit operator guardrails/ergonomics with transition-constrained patch options and reason-required merge/override + terminal patch actions.
+- [x] Expand `L1` moderation/admin Playwright coverage (mock + live) for cockpit guardrails and reason-gated mutation flows.
 
 ## Decision Log
 - 2026-02-08: Chose in-memory bootstrap for API/worker while committing canonical SQL schema.
@@ -87,6 +89,7 @@ Bootstrap this repository into a real project implementation using the handoff s
 - 2026-02-10: Hardened `.github/workflows/ci.yml` `web-e2e-live` with uv/pnpm/Playwright caching, explicit timeout budgets, and single-step retry-once logic for transient E2E startup failures.
 - 2026-02-10: Switched `web/playwright.live.config.ts` to cached Chromium (`channel` removed), set CI `globalTimeout` budget, and disabled blanket CI per-test retries in favor of scoped job-step retry.
 - 2026-02-10: Added `web/tests/admin-proxy-failure-mapping.test.ts` contracts and extracted `web/lib/admin-api-core.ts` so admin proxy passthrough/error-shape behavior is verified in `node:test` without Next runtime imports.
+- 2026-02-11: Added cockpit guardrail UX in `moderator-cockpit-client` (patch transition options based on selected candidate state, required reasons for merge/override and terminal patch states, merge quick-pick selector) with contract + mock/live Playwright coverage.
 
 ## Plan of Work
 1. Foundation bootstrap
@@ -118,5 +121,5 @@ Bootstrap this repository into a real project implementation using the handoff s
 ## Outcomes and Retrospective
 - Outcome: `IN_PROGRESS`
 - Follow-ups:
-1. Keep full moderation/admin E2E coverage under `L1` as the primary remaining validation gap.
-2. Open PR with `docs/roadmap/L1_E2E_PR_SUMMARY_2026-02-11.md` and continue L1 full E2E scope expansion.
+1. Continue `L1` moderation/admin E2E breadth (additional filter/pagination edge cases, multi-candidate queue workflows, and trust-policy/admin-surface cross-flow scenarios).
+2. Move next to `J1/J2/M1` hardening track (observability + dashboards/alerts + deploy/migration gate completeness) per implementation-plan critical path.

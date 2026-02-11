@@ -333,7 +333,129 @@ test("merge form rejects selecting the same candidate as secondary", async ({ pa
 
   const mergeForm = page.locator("article:has(h2:text-is('Selected Candidate Actions')) form").nth(1);
   await mergeForm.getByLabel("Secondary Candidate ID").fill(PRIMARY_CANDIDATE_ID);
+  await mergeForm.getByLabel("Reason").fill("self merge should be blocked");
   await mergeForm.getByRole("button", { name: "Merge Candidate" }).click();
 
   await expect(page.getByText("secondary_candidate_id must differ from selected candidate.")).toBeVisible();
+});
+
+test("patch transitions are constrained and terminal transitions require reason", async ({ page }) => {
+  const startedAt = "2026-02-10T20:02:39.338252Z";
+  const candidate: CandidateRecord = {
+    id: PRIMARY_CANDIDATE_ID,
+    state: "needs_review",
+    dedupe_confidence: 0.91,
+    risk_flags: ["manual_review_needed"],
+    extracted_fields: { title: "E2E Primary Candidate" },
+    discovery_ids: ["c0315d98-ef37-49a3-b7ba-1cae768c8964"],
+    posting_id: POSTING_ID,
+    created_at: startedAt,
+    updated_at: startedAt
+  };
+
+  let patchCalls = 0;
+
+  await page.route(/\/api\/admin\/candidates(?:\?.*)?$/, async (route) => jsonResponse(route, [candidate]));
+  await page.route(/\/api\/admin\/modules(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+  await page.route(/\/api\/admin\/jobs(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+  await page.route(/\/api\/admin\/candidates\/[^/?]+(?:\?.*)?$/, async (route) => {
+    patchCalls += 1;
+    const body = route.request().postDataJSON() as { state: CandidateState; reason?: string };
+    candidate.state = body.state;
+    return jsonResponse(route, candidate);
+  });
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+  await expect(page.getByText(`${PRIMARY_CANDIDATE_ID} (needs_review)`)).toBeVisible();
+
+  const patchForm = page.locator("article:has(h2:text-is('Selected Candidate Actions')) form").nth(0);
+  const patchStateSelect = patchForm.getByLabel("State");
+  const patchStateOptions = await patchStateSelect
+    .locator("option")
+    .evaluateAll((nodes) => nodes.map((node) => (node as HTMLOptionElement).value));
+  expect(patchStateOptions).toEqual(["processed", "publishable", "rejected", "archived", "needs_review"]);
+
+  await patchStateSelect.selectOption("rejected");
+  const patchSubmit = patchForm.getByRole("button", { name: "Apply State Patch" });
+  await expect(patchSubmit).toBeDisabled();
+  expect(patchCalls).toBe(0);
+
+  await patchForm.getByLabel("Reason").fill("close candidate from UI guardrail test");
+  await expect(patchSubmit).toBeEnabled();
+  await patchSubmit.click();
+
+  await expect(page.getByText(`Candidate patch action completed for ${PRIMARY_CANDIDATE_ID}.`)).toBeVisible();
+  expect(patchCalls).toBe(1);
+});
+
+test("merge and override actions require reason before submit", async ({ page }) => {
+  const startedAt = "2026-02-10T20:02:39.338252Z";
+  const primaryCandidate: CandidateRecord = {
+    id: PRIMARY_CANDIDATE_ID,
+    state: "needs_review",
+    dedupe_confidence: 0.91,
+    risk_flags: ["manual_review_needed"],
+    extracted_fields: { title: "E2E Primary Candidate" },
+    discovery_ids: ["c0315d98-ef37-49a3-b7ba-1cae768c8964"],
+    posting_id: POSTING_ID,
+    created_at: startedAt,
+    updated_at: startedAt
+  };
+  const secondaryCandidate: CandidateRecord = {
+    id: SECONDARY_CANDIDATE_ID,
+    state: "needs_review",
+    dedupe_confidence: 0.72,
+    risk_flags: [],
+    extracted_fields: { title: "E2E Secondary Candidate" },
+    discovery_ids: ["9ab15d98-ef37-49a3-b7ba-1cae768c8964"],
+    posting_id: null,
+    created_at: startedAt,
+    updated_at: startedAt
+  };
+
+  let mergeCalls = 0;
+  let overrideCalls = 0;
+
+  await page.route(/\/api\/admin\/candidates(?:\?.*)?$/, async (route) =>
+    jsonResponse(route, [primaryCandidate, secondaryCandidate])
+  );
+  await page.route(/\/api\/admin\/modules(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+  await page.route(/\/api\/admin\/jobs(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+  await page.route(/\/api\/admin\/candidates\/[^/?]+\/merge(?:\?.*)?$/, async (route) => {
+    mergeCalls += 1;
+    return jsonResponse(route, primaryCandidate);
+  });
+  await page.route(/\/api\/admin\/candidates\/[^/?]+\/override(?:\?.*)?$/, async (route) => {
+    overrideCalls += 1;
+    return jsonResponse(route, primaryCandidate);
+  });
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+
+  const forms = page.locator("article:has(h2:text-is('Selected Candidate Actions')) form");
+  const mergeForm = forms.nth(1);
+  const overrideForm = forms.nth(2);
+
+  await mergeForm.getByLabel("Secondary Candidate ID").fill(SECONDARY_CANDIDATE_ID);
+  const mergeButton = mergeForm.getByRole("button", { name: "Merge Candidate" });
+  await expect(mergeButton).toBeDisabled();
+  expect(mergeCalls).toBe(0);
+
+  await mergeForm.getByLabel("Reason").fill("required reason merge");
+  await expect(mergeButton).toBeEnabled();
+  await mergeButton.click();
+  await expect(page.getByText(`Candidate merge action completed for ${PRIMARY_CANDIDATE_ID}.`)).toBeVisible();
+  expect(mergeCalls).toBe(1);
+
+  const overrideButton = overrideForm.getByRole("button", { name: "Apply Override" });
+  await expect(overrideButton).toBeDisabled();
+  expect(overrideCalls).toBe(0);
+
+  await overrideForm.getByLabel("Reason").fill("required reason override");
+  await expect(overrideButton).toBeEnabled();
+  await overrideButton.click();
+  await expect(page.getByText(`Candidate override action completed for ${PRIMARY_CANDIDATE_ID}.`)).toBeVisible();
+  expect(overrideCalls).toBe(1);
 });

@@ -24,6 +24,7 @@
 21. For queue-like maintenance flows, assert backend state deltas against returned counts (for example `queued_after - queued_before == enqueue_count`) rather than fixed entity IDs when ordering/data may vary.
 22. Keep framework-dependent route wrappers thin and move forwarding/error-shaping logic into framework-agnostic core modules so `node:test` contract coverage can run without runtime adapters.
 23. Prefer scoped retry at CI step/job level for known startup flakes; keep per-test retries disabled for deterministic contract failures.
+24. For moderation/admin UIs, mirror backend transition guards in shared frontend utilities and drive selectable action states from those utilities to prevent policy drift and avoid avoidable `409` user paths.
 
 ## Anti-patterns
 1. Hidden side effects without tests or receipts.
