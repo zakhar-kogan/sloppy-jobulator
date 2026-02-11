@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+from opentelemetry import trace
+
+tracer = trace.get_tracer(__name__)
 
 
 class JobClient:
@@ -14,20 +17,25 @@ class JobClient:
         }
 
     async def get_jobs(self, limit: int = 10) -> list[dict[str, Any]]:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"{self.base_url}/jobs", params={"limit": limit}, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
+        with tracer.start_as_current_span("job_client.get_jobs") as span:
+            span.set_attribute("jobs.limit", limit)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{self.base_url}/jobs", params={"limit": limit}, headers=self.headers)
+                response.raise_for_status()
+                return response.json()
 
     async def claim_job(self, job_id: str, lease_seconds: int = 120) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                f"{self.base_url}/jobs/{job_id}/claim",
-                json={"lease_seconds": lease_seconds},
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            return response.json()
+        with tracer.start_as_current_span("job_client.claim_job") as span:
+            span.set_attribute("job.id", job_id)
+            span.set_attribute("job.lease_seconds", lease_seconds)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/jobs/{job_id}/claim",
+                    json={"lease_seconds": lease_seconds},
+                    headers=self.headers,
+                )
+                response.raise_for_status()
+                return response.json()
 
     async def submit_result(
         self,
@@ -42,29 +50,36 @@ class JobClient:
             "result_json": result_json,
             "error_json": error_json,
         }
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(f"{self.base_url}/jobs/{job_id}/result", json=payload, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
+        with tracer.start_as_current_span("job_client.submit_result") as span:
+            span.set_attribute("job.id", job_id)
+            span.set_attribute("job.status", status)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(f"{self.base_url}/jobs/{job_id}/result", json=payload, headers=self.headers)
+                response.raise_for_status()
+                return response.json()
 
     async def reap_expired_jobs(self, limit: int = 100) -> int:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                f"{self.base_url}/jobs/reap-expired",
-                params={"limit": limit},
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            return int(payload.get("requeued", 0))
+        with tracer.start_as_current_span("job_client.reap_expired_jobs") as span:
+            span.set_attribute("jobs.limit", limit)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/jobs/reap-expired",
+                    params={"limit": limit},
+                    headers=self.headers,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                return int(payload.get("requeued", 0))
 
     async def enqueue_freshness_jobs(self, limit: int = 100) -> int:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                f"{self.base_url}/jobs/enqueue-freshness",
-                params={"limit": limit},
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            return int(payload.get("enqueued", 0))
+        with tracer.start_as_current_span("job_client.enqueue_freshness_jobs") as span:
+            span.set_attribute("jobs.limit", limit)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/jobs/enqueue-freshness",
+                    params={"limit": limit},
+                    headers=self.headers,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                return int(payload.get("enqueued", 0))

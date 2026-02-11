@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_anon_key: str | None = None
     auth_timeout_seconds: float = 5.0
+    otel_enabled: bool = True
+    otel_service_name: str = "sloppy-jobulator-api"
+    otel_exporter_otlp_endpoint: str | None = None
+    otel_exporter_otlp_headers: str | None = None
+    otel_trace_sample_ratio: float = 1.0
+    otel_log_correlation: bool = True
 
     model_config = SettingsConfigDict(env_prefix="SJ_", extra="ignore")
 
