@@ -38,6 +38,24 @@ export function parseAdminCount(payload: unknown): number {
   return 0;
 }
 
+export function coerceBoundedInteger(
+  rawValue: string,
+  options: {
+    min: number;
+    max: number;
+    fallback: number;
+  }
+): number {
+  const { min, max, fallback } = options;
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const normalized = Math.trunc(parsed);
+  return Math.min(max, Math.max(min, normalized));
+}
+
 export function canTransitionCandidateState(fromState: CandidateState, toState: CandidateState): boolean {
   if (fromState === toState) {
     return true;

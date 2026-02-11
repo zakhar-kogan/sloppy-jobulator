@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   canTransitionCandidateState,
+  coerceBoundedInteger,
   encodeAdminQuery,
   listPatchCandidateStates,
   parseAdminCount
@@ -40,6 +41,13 @@ test("parseAdminCount returns numeric count values", () => {
   assert.equal(parseAdminCount({ count: 7 }), 7);
 });
 
+test("coerceBoundedInteger clamps and normalizes numeric values", () => {
+  assert.equal(coerceBoundedInteger("150", minMaxFallback(1, 100, 50)), 100);
+  assert.equal(coerceBoundedInteger("-5", minMaxFallback(1, 100, 50)), 1);
+  assert.equal(coerceBoundedInteger("14.8", minMaxFallback(1, 100, 50)), 14);
+  assert.equal(coerceBoundedInteger("not-a-number", minMaxFallback(1, 100, 50)), 50);
+});
+
 test("canTransitionCandidateState mirrors backend transition rules", () => {
   assert.equal(canTransitionCandidateState("needs_review", "publishable"), true);
   assert.equal(canTransitionCandidateState("needs_review", "closed"), false);
@@ -66,3 +74,11 @@ test("listPatchCandidateStates filters candidate states using transition guardra
   const fromPublished = listPatchCandidateStates("published", orderedStates);
   assert.deepEqual(fromPublished, ["published", "closed", "archived"]);
 });
+
+function minMaxFallback(min: number, max: number, fallback: number): {
+  min: number;
+  max: number;
+  fallback: number;
+} {
+  return { min, max, fallback };
+}
