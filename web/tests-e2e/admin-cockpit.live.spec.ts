@@ -333,10 +333,19 @@ test("cockpit live flow persists merge, moderation, module toggles, and posting 
   const queuedFreshnessJobsBefore = await listAdminJobs(request, "status=queued&kind=check_freshness&limit=200");
   const queuedFreshnessJobIdsBefore = new Set(queuedFreshnessJobsBefore.map((job) => job.id));
   const maintenanceLimitInput = page.getByLabel("Maintenance Limit");
+  const maintenanceConfirmationInput = page.getByLabel("Maintenance Confirmation");
+  const enqueueButton = page.getByRole("button", { name: "Enqueue Freshness" });
+  const reapButton = page.getByRole("button", { name: "Reap Expired" });
   await expect(maintenanceLimitInput).toBeVisible();
+  await expect(maintenanceConfirmationInput).toBeVisible();
   await maintenanceLimitInput.fill("1");
+  await expect(enqueueButton).toBeDisabled();
+  await expect(reapButton).toBeDisabled();
+  await maintenanceConfirmationInput.fill("CONFIRM");
+  await expect(enqueueButton).toBeEnabled();
+  await expect(reapButton).toBeEnabled();
 
-  await page.getByRole("button", { name: "Enqueue Freshness" }).click();
+  await enqueueButton.click();
   const enqueueStatus = page.getByText(/Enqueued \d+ freshness jobs\./).first();
   await expect(enqueueStatus).toBeVisible();
   const enqueueMessage = await enqueueStatus.innerText();
@@ -371,7 +380,7 @@ test("cockpit live flow persists merge, moderation, module toggles, and posting 
   const claimedJobsBeforeReap = await listAdminJobs(request, "status=claimed&limit=200");
   expect(claimedJobsBeforeReap.some((job) => job.id === expiringJob!.id)).toBeTruthy();
 
-  await page.getByRole("button", { name: "Reap Expired" }).click();
+  await reapButton.click();
   await expect(page.getByText(/Requeued \d+ expired claimed jobs\./)).toBeVisible();
   const claimedJobsAfterReap = await listAdminJobs(request, "status=claimed&limit=200");
   expect(claimedJobsAfterReap.some((job) => job.id === expiringJob!.id)).toBeFalsy();

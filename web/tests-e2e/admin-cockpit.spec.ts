@@ -270,6 +270,7 @@ test("admin cockpit handles candidate, module, and jobs operator actions", async
   await expect(page.getByText("Updated local-processor enabled=true.")).toBeVisible();
   await expect(processorRow).toContainText("true");
 
+  await page.getByLabel("Maintenance Confirmation").fill("CONFIRM");
   await page.getByRole("button", { name: "Enqueue Freshness" }).click();
   await expect(page.getByText("Enqueued 0 freshness jobs.")).toBeVisible();
 
@@ -502,8 +503,12 @@ test("cockpit clamps filter and maintenance limits to backend contract bounds", 
   expect(lastCandidatesQuery).toContain("limit=100");
 
   const jobsPanel = page.locator("article:has(h2:text-is('Jobs'))");
+  const enqueueButton = jobsPanel.getByRole("button", { name: "Enqueue Freshness" });
+  await expect(enqueueButton).toBeDisabled();
   await jobsPanel.getByLabel("Maintenance Limit").fill("5000");
-  await jobsPanel.getByRole("button", { name: "Enqueue Freshness" }).click();
+  await jobsPanel.getByLabel("Maintenance Confirmation").fill("CONFIRM");
+  await expect(enqueueButton).toBeEnabled();
+  await enqueueButton.click();
   await expect(page.getByText("Enqueued 0 freshness jobs.")).toBeVisible();
 
   const lastEnqueueQuery = enqueueQueries.at(-1) ?? "";

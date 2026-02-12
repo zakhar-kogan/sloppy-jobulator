@@ -61,7 +61,10 @@ async def run_worker() -> None:
                             job_span.set_attribute("job.id", job["id"])
                             claimed = await client.claim_job(job["id"], lease_seconds=settings.claim_lease_seconds)
                             try:
-                                result = await execute_job(claimed)
+                                result = await execute_job(
+                                    claimed,
+                                    redirect_resolution_timeout_seconds=settings.redirect_resolution_timeout_seconds,
+                                )
                             except Exception as exc:  # pragma: no cover - bootstrap robustness
                                 await client.submit_result(
                                     claimed["id"],

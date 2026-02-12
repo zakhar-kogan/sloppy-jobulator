@@ -41,6 +41,7 @@ const CANDIDATE_LIMIT_MAX = 100;
 const MODULE_LIMIT_MAX = 200;
 const JOB_LIMIT_MAX = 200;
 const MAINTENANCE_LIMIT_MAX = 1000;
+const MAINTENANCE_CONFIRM_TOKEN = "CONFIRM";
 
 type BoolFilter = "all" | "true" | "false";
 type CandidateStateFilter = "all" | CandidateState;
@@ -97,6 +98,7 @@ export function ModeratorCockpitClient(): JSX.Element {
   const [jobError, setJobError] = useState<string | null>(null);
   const [jobMessage, setJobMessage] = useState<string | null>(null);
   const [maintenanceLimit, setMaintenanceLimit] = useState(100);
+  const [maintenanceConfirmation, setMaintenanceConfirmation] = useState("");
   const [jobMaintenanceBusy, setJobMaintenanceBusy] = useState<"enqueue" | "reap" | null>(null);
 
   const candidateQueryString = useMemo(
@@ -398,6 +400,11 @@ export function ModeratorCockpitClient(): JSX.Element {
   }
 
   async function runJobsMaintenance(kind: "enqueue" | "reap"): Promise<void> {
+    if (maintenanceConfirmation.trim().toUpperCase() !== MAINTENANCE_CONFIRM_TOKEN) {
+      setJobError(`Type ${MAINTENANCE_CONFIRM_TOKEN} to confirm maintenance actions.`);
+      return;
+    }
+
     setJobMaintenanceBusy(kind);
     setJobError(null);
     setJobMessage(null);
@@ -800,7 +807,18 @@ export function ModeratorCockpitClient(): JSX.Element {
               max={MAINTENANCE_LIMIT_MAX}
             />
           </label>
+          <label className="control">
+            <span>Maintenance Confirmation</span>
+            <input
+              value={maintenanceConfirmation}
+              onChange={(event) => setMaintenanceConfirmation(event.target.value)}
+              placeholder={`Type ${MAINTENANCE_CONFIRM_TOKEN}`}
+            />
+          </label>
         </div>
+        <p className="status">
+          High-impact maintenance actions require confirmation: <code>{MAINTENANCE_CONFIRM_TOKEN}</code>.
+        </p>
 
         <div className="actions">
           <button className="button button-primary" type="button" onClick={() => void loadJobs()}>
@@ -810,7 +828,10 @@ export function ModeratorCockpitClient(): JSX.Element {
             className="button"
             type="button"
             onClick={() => void runJobsMaintenance("enqueue")}
-            disabled={jobMaintenanceBusy !== null}
+            disabled={
+              jobMaintenanceBusy !== null ||
+              maintenanceConfirmation.trim().toUpperCase() !== MAINTENANCE_CONFIRM_TOKEN
+            }
           >
             {jobMaintenanceBusy === "enqueue" ? "Running…" : "Enqueue Freshness"}
           </button>
@@ -818,7 +839,10 @@ export function ModeratorCockpitClient(): JSX.Element {
             className="button"
             type="button"
             onClick={() => void runJobsMaintenance("reap")}
-            disabled={jobMaintenanceBusy !== null}
+            disabled={
+              jobMaintenanceBusy !== null ||
+              maintenanceConfirmation.trim().toUpperCase() !== MAINTENANCE_CONFIRM_TOKEN
+            }
           >
             {jobMaintenanceBusy === "reap" ? "Running…" : "Reap Expired"}
           </button>

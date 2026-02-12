@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     freshness_check_interval_hours: int = 24
     freshness_stale_after_hours: int = 24
     freshness_archive_after_hours: int = 72
+    enable_redirect_resolution_jobs: bool = False
     supabase_url: str | None = None
     supabase_anon_key: str | None = None
     auth_timeout_seconds: float = 5.0

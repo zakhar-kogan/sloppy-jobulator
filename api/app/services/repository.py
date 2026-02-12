@@ -11,6 +11,7 @@ import asyncpg  # type: ignore[import-untyped]
 from asyncpg import exceptions as pg_exc
 
 from app.core.config import get_settings
+from app.core.urls import canonical_hash, normalize_url
 from app.services.dedupe import (
     DedupeCandidateSnapshot,
     DedupePolicyDecision,
@@ -94,6 +95,7 @@ class PostgresRepository:
         freshness_check_interval_hours: int,
         freshness_stale_after_hours: int,
         freshness_archive_after_hours: int,
+        enable_redirect_resolution_jobs: bool,
     ) -> None:
         self.database_url = database_url
         self.min_pool_size = min_pool_size
@@ -104,6 +106,7 @@ class PostgresRepository:
         self.freshness_check_interval_hours = max(1, freshness_check_interval_hours)
         self.freshness_stale_after_hours = max(1, freshness_stale_after_hours)
         self.freshness_archive_after_hours = max(self.freshness_stale_after_hours, freshness_archive_after_hours)
+        self.enable_redirect_resolution_jobs = enable_redirect_resolution_jobs
         self._pool: asyncpg.Pool | None = None
 
     async def close(self) -> None:
@@ -296,6 +299,7 @@ class PostgresRepository:
         text_hint: str | None,
         metadata: dict[str, Any],
         actor_module_db_id: str,
+        enqueue_redirect_resolution: bool,
     ) -> str:
         pool = await self._get_pool()
 
@@ -428,6 +432,20 @@ class PostgresRepository:
                         discovery_id,
                         json.dumps({"discovery_id": discovery_id}),
                     )
+                    if (
+                        self.enable_redirect_resolution_jobs
+                        and enqueue_redirect_resolution
+                        and isinstance(url, str)
+                        and url.strip()
+                    ):
+                        await conn.execute(
+                            """
+                            insert into jobs (kind, target_type, target_id, inputs_json)
+                            values ('resolve_url_redirects', 'discovery', $1::uuid, $2::jsonb)
+                            """,
+                            discovery_id,
+                            json.dumps({"discovery_id": discovery_id, "url": url.strip()}),
+                        )
                     await conn.execute(
                         """
                         insert into provenance_events (
@@ -863,6 +881,15 @@ class PostgresRepository:
                                 posting_id=row["target_id"],
                                 actor_module_db_id=module_db_id,
                                 attempt=attempt,
+                            )
+                    if row["kind"] == "resolve_url_redirects" and row["target_type"] == "discovery" and row["target_id"]:
+                        if row["status"] == "done":
+                            await self._apply_redirect_resolution_result(
+                                conn=conn,
+                                job_id=row["id"],
+                                discovery_id=row["target_id"],
+                                actor_module_db_id=module_db_id,
+                                result_json=result_json,
                             )
 
                     await conn.execute(
@@ -2792,6 +2819,166 @@ class PostgresRepository:
 
         return True
 
+    async def _apply_redirect_resolution_result(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        job_id: str,
+        discovery_id: str,
+        actor_module_db_id: str,
+        result_json: dict[str, Any] | None,
+    ) -> None:
+        payload = result_json if isinstance(result_json, dict) else {}
+        resolved_url = self._coerce_text(payload.get("resolved_url"))
+        if not resolved_url:
+            await conn.execute(
+                """
+                insert into provenance_events (
+                  entity_type,
+                  entity_id,
+                  event_type,
+                  actor_type,
+                  actor_id,
+                  payload
+                )
+                values ('job', $1::uuid, 'redirect_result_applied', 'machine', $2::uuid, $3::jsonb)
+                """,
+                job_id,
+                actor_module_db_id,
+                json.dumps(
+                    {
+                        "discovery_id": discovery_id,
+                        "applied": False,
+                        "reason": "missing_resolved_url",
+                    }
+                ),
+            )
+            return
+
+        normalized_url = normalize_url(resolved_url)
+        hashed = canonical_hash(normalized_url)
+
+        discovery_row = await conn.fetchrow(
+            """
+            select
+              id::text as id,
+              url,
+              normalized_url,
+              canonical_hash
+            from discoveries
+            where id = $1::uuid
+            for update
+            """,
+            discovery_id,
+        )
+        if not discovery_row:
+            return
+
+        previous_url = self._coerce_text(discovery_row["url"])
+        previous_normalized_url = self._coerce_text(discovery_row["normalized_url"])
+        previous_canonical_hash = self._coerce_text(discovery_row["canonical_hash"])
+        changed = (
+            previous_url != resolved_url
+            or previous_normalized_url != normalized_url
+            or previous_canonical_hash != hashed
+        )
+
+        if changed:
+            await conn.execute(
+                """
+                update discoveries
+                set
+                  url = $2,
+                  normalized_url = $3,
+                  canonical_hash = $4
+                where id = $1::uuid
+                """,
+                discovery_id,
+                resolved_url,
+                normalized_url,
+                hashed,
+            )
+
+            queued_extract_exists = await conn.fetchval(
+                """
+                select 1
+                from jobs
+                where kind = 'extract'
+                  and target_type = 'discovery'
+                  and target_id = $1::uuid
+                  and status in ('queued', 'claimed')
+                limit 1
+                """,
+                discovery_id,
+            )
+            if not queued_extract_exists:
+                await conn.execute(
+                    """
+                    insert into jobs (kind, target_type, target_id, inputs_json, next_run_at)
+                    values ('extract', 'discovery', $1::uuid, $2::jsonb, now())
+                    """,
+                    discovery_id,
+                    json.dumps(
+                        {
+                            "discovery_id": discovery_id,
+                            "source": "resolve_url_redirects",
+                            "resolved_url": resolved_url,
+                        }
+                    ),
+                )
+
+            await conn.execute(
+                """
+                insert into provenance_events (
+                  entity_type,
+                  entity_id,
+                  event_type,
+                  actor_type,
+                  actor_id,
+                  payload
+                )
+                values ('discovery', $1::uuid, 'redirect_resolved', 'machine', $2::uuid, $3::jsonb)
+                """,
+                discovery_id,
+                actor_module_db_id,
+                json.dumps(
+                    {
+                        "job_id": job_id,
+                        "previous_url": previous_url,
+                        "resolved_url": resolved_url,
+                        "previous_normalized_url": previous_normalized_url,
+                        "normalized_url": normalized_url,
+                        "previous_canonical_hash": previous_canonical_hash,
+                        "canonical_hash": hashed,
+                    }
+                ),
+            )
+
+        await conn.execute(
+            """
+            insert into provenance_events (
+              entity_type,
+              entity_id,
+              event_type,
+              actor_type,
+              actor_id,
+              payload
+            )
+            values ('job', $1::uuid, 'redirect_result_applied', 'machine', $2::uuid, $3::jsonb)
+            """,
+            job_id,
+            actor_module_db_id,
+            json.dumps(
+                {
+                    "discovery_id": discovery_id,
+                    "applied": changed,
+                    "resolved_url": resolved_url,
+                    "normalized_url": normalized_url,
+                    "canonical_hash": hashed,
+                }
+            ),
+        )
+
     async def _fetch_candidate_row(self, *, conn: asyncpg.Connection, candidate_id: str) -> asyncpg.Record | None:
         return await conn.fetchrow(
             """
@@ -3728,4 +3915,5 @@ def get_repository() -> PostgresRepository:
         freshness_check_interval_hours=settings.freshness_check_interval_hours,
         freshness_stale_after_hours=settings.freshness_stale_after_hours,
         freshness_archive_after_hours=settings.freshness_archive_after_hours,
+        enable_redirect_resolution_jobs=settings.enable_redirect_resolution_jobs,
     )

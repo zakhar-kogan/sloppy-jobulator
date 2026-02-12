@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.security import get_machine_principal
 from app.core.urls import canonical_hash, normalize_url
+from app.core.config import get_settings
 from app.schemas.discoveries import DiscoveryAccepted, DiscoveryEvent
 from app.services.repository import (
     RepositoryConflictError,
@@ -18,6 +19,8 @@ async def create_discovery(
     principal=Depends(get_machine_principal),
     repository=Depends(get_repository),
 ) -> DiscoveryAccepted:
+    settings = get_settings()
+
     try:
         principal.require_scopes({"discoveries:write"})
     except PermissionError as exc:
@@ -46,6 +49,7 @@ async def create_discovery(
             text_hint=payload.text_hint,
             metadata=payload.metadata,
             actor_module_db_id=principal.actor_id,
+            enqueue_redirect_resolution=settings.enable_redirect_resolution_jobs,
         )
     except RepositoryUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc

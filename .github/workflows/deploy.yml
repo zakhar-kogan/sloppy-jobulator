@@ -1,0 +1,175 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target deployment environment"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  resolve-context:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.context.outputs.should_run }}
+      environment: ${{ steps.context.outputs.environment }}
+    steps:
+      - name: Resolve deploy context
+        id: context
+        run: |
+          SHOULD_RUN=false
+          ENVIRONMENT=staging
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            SHOULD_RUN=true
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            if [[ "${{ github.event.workflow_run.conclusion }}" == "success" && "${{ github.event.workflow_run.head_branch }}" == "main" ]]; then
+              SHOULD_RUN=true
+              ENVIRONMENT=production
+            fi
+          fi
+
+          echo "should_run=${SHOULD_RUN}" >> "$GITHUB_OUTPUT"
+          echo "environment=${ENVIRONMENT}" >> "$GITHUB_OUTPUT"
+
+  deploy-api-workers:
+    needs: resolve-context
+    if: needs.resolve-context.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-context.outputs.environment }}
+    env:
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ secrets.GCP_REGION }}
+      CLOUD_RUN_API_SERVICE: ${{ secrets.CLOUD_RUN_API_SERVICE }}
+      CLOUD_RUN_WORKER_JOB: ${{ secrets.CLOUD_RUN_WORKER_JOB }}
+      DATABASE_URL: ${{ secrets.SJ_DATABASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate deploy bindings
+        id: validate
+        run: |
+          missing=0
+          for var in GCP_WORKLOAD_IDENTITY_PROVIDER GCP_SERVICE_ACCOUNT_EMAIL GCP_PROJECT_ID GCP_REGION CLOUD_RUN_API_SERVICE CLOUD_RUN_WORKER_JOB DATABASE_URL; do
+            if [[ -z "${!var}" ]]; then
+              echo "Missing required secret: ${var}"
+              missing=1
+            fi
+          done
+          if [[ "$missing" -eq 1 ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        if: steps.validate.outputs.ready == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Setup gcloud
+        if: steps.validate.outputs.ready == 'true'
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Migration safety gate (deploy env)
+        if: steps.validate.outputs.ready == 'true'
+        run: bash scripts/migration-safety-gate.sh
+
+      - name: Deploy API service
+        if: steps.validate.outputs.ready == 'true'
+        run: |
+          gcloud run deploy "$CLOUD_RUN_API_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --source ./api \
+            --set-env-vars "SJ_DATABASE_URL=${DATABASE_URL}" \
+            --quiet
+
+      - name: Deploy worker job
+        if: steps.validate.outputs.ready == 'true'
+        run: |
+          gcloud run jobs deploy "$CLOUD_RUN_WORKER_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --source ./workers \
+            --set-env-vars "SJ_WORKER_API_BASE_URL=https://${CLOUD_RUN_API_SERVICE}-${GCP_REGION}.a.run.app" \
+            --quiet
+
+      - name: Deployment skipped summary
+        if: steps.validate.outputs.ready != 'true'
+        run: echo "API/worker deploy skipped: required environment secrets are not bound."
+
+  deploy-web:
+    needs: resolve-context
+    if: needs.resolve-context.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-context.outputs.environment }}
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      TARGET_ENVIRONMENT: ${{ needs.resolve-context.outputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Validate Vercel bindings
+        id: validate
+        run: |
+          if [[ -z "$VERCEL_TOKEN" || -z "$VERCEL_ORG_ID" || -z "$VERCEL_PROJECT_ID" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install web deps
+        if: steps.validate.outputs.ready == 'true'
+        run: pnpm install --dir web --frozen-lockfile
+
+      - name: Build web
+        if: steps.validate.outputs.ready == 'true'
+        run: pnpm --dir web build
+
+      - name: Deploy web with Vercel
+        if: steps.validate.outputs.ready == 'true'
+        run: |
+          args=()
+          if [[ "$TARGET_ENVIRONMENT" == "production" ]]; then
+            args+=(--prod)
+          fi
+          npx vercel deploy "${args[@]}" \
+            --cwd web \
+            --yes \
+            --token "$VERCEL_TOKEN"
+
+      - name: Deployment skipped summary
+        if: steps.validate.outputs.ready != 'true'
+        run: echo "Web deploy skipped: required Vercel secrets are not bound."
