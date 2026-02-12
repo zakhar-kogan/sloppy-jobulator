@@ -259,13 +259,21 @@ limit 20;
 - Use `docs/observability/ENVIRONMENT_BINDINGS.md` for staging/production project labels, notification channels, and OTLP endpoint wiring.
 6. Import commands:
 ```bash
-gcloud monitoring dashboards create \
-  --project "${GCP_PROJECT_ID}" \
-  --config-from-file docs/observability/cloud-monitoring-dashboard.json
-
-gcloud alpha monitoring policies create \
-  --project "${GCP_PROJECT_ID}" \
-  --policy-from-file docs/observability/alert-policies.yaml
+GCP_PROJECT_ID="<project>" \
+SJ_OBS_ENVIRONMENT=staging \
+SJ_OBS_API_CLOUD_RUN_SERVICE=sloppy-jobulator-api-staging \
+SJ_OBS_WORKER_OTEL_SERVICE=sloppy-jobulator-workers-staging \
+SJ_OBS_NOTIFICATION_CHANNELS="projects/<project>/notificationChannels/<id>" \
+bash scripts/import-observability-assets.sh
+```
+7. Telemetry quality check command:
+```bash
+GCP_PROJECT_ID="<project>" \
+SJ_OBS_ENVIRONMENT=staging \
+SJ_OBS_API_CLOUD_RUN_SERVICE=sloppy-jobulator-api-staging \
+SJ_OBS_WORKER_OTEL_SERVICE=sloppy-jobulator-workers-staging \
+SJ_API_BASE_URL="https://api-staging.example.com" \
+bash scripts/validate-telemetry-quality.sh
 ```
 
 ## M1 Migration/Deploy Safety Gates

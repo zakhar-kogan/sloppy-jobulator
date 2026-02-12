@@ -3,72 +3,87 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from app.jobs.executor import execute_job
+import httpx
+
 from app.jobs.redirects import execute_resolve_url_redirects
 
 
-def test_execute_resolve_url_redirects_missing_url_input() -> None:
+def test_resolve_url_redirects_follows_chain_and_normalizes_url() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == "http://example.edu/jobs/role?utm_source=feed":
+            return httpx.Response(
+                status_code=301,
+                headers={"location": "/jobs/role-final?sessionId=abc&utm_medium=email"},
+                request=request,
+            )
+        if str(request.url) == "http://example.edu/jobs/role-final?sessionId=abc&utm_medium=email":
+            return httpx.Response(status_code=200, request=request)
+        return httpx.Response(status_code=404, request=request)
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport, follow_redirects=False) as client:
+            return await execute_resolve_url_redirects(
+                {
+                    "kind": "resolve_url_redirects",
+                    "target_type": "discovery",
+                    "target_id": "discovery-1",
+                    "inputs_json": {
+                        "url": "http://example.edu/jobs/role?utm_source=feed",
+                        "normalization_overrides_json": (
+                            '{"example.edu":{"strip_query_params":["sessionid"],"force_https":true}}'
+                        ),
+                    },
+                },
+                client=client,
+            )
+
+    result = asyncio.run(run())
+    assert result["reason"] == "resolved"
+    assert result["redirect_hop_count"] == 1
+    assert result["resolved_url"] == "http://example.edu/jobs/role-final?sessionId=abc&utm_medium=email"
+    assert result["resolved_normalized_url"] == "https://example.edu/jobs/role-final"
+    assert isinstance(result["resolved_canonical_hash"], str)
+    assert len(result["resolved_canonical_hash"]) == 64
+
+
+def test_resolve_url_redirects_detects_redirect_loop() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == "https://loop.example.edu/a":
+            return httpx.Response(status_code=302, headers={"location": "/b"}, request=request)
+        if str(request.url) == "https://loop.example.edu/b":
+            return httpx.Response(status_code=302, headers={"location": "/a"}, request=request)
+        return httpx.Response(status_code=404, request=request)
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport, follow_redirects=False) as client:
+            return await execute_resolve_url_redirects(
+                {
+                    "kind": "resolve_url_redirects",
+                    "target_type": "discovery",
+                    "target_id": "discovery-loop",
+                    "inputs_json": {"url": "https://loop.example.edu/a", "max_hops": 10},
+                },
+                client=client,
+            )
+
+    result = asyncio.run(run())
+    assert result["reason"] == "redirect_loop_detected"
+    assert result["redirect_hop_count"] == 2
+    assert result["resolved_url"] == "https://loop.example.edu/a"
+
+
+def test_resolve_url_redirects_handles_missing_url() -> None:
     result = asyncio.run(
         execute_resolve_url_redirects(
             {
                 "kind": "resolve_url_redirects",
                 "target_type": "discovery",
-                "target_id": "discovery-1",
+                "target_id": "discovery-missing",
                 "inputs_json": {},
             }
         )
     )
-    assert result["handled"] is True
-    assert result["reason"] == "missing_url_input"
-    assert result["resolved_url"] is None
-
-
-def test_execute_resolve_url_redirects_uses_followed_location(monkeypatch) -> None:
-    class FakeResponse:
-        def __init__(self, status_code: int, url: str, history: list[object] | None = None) -> None:
-            self.status_code = status_code
-            self.url = url
-            self.history = history or []
-
-    class FakeClient:
-        def __init__(self, *_: Any, **__: Any) -> None:
-            return
-
-        async def __aenter__(self) -> FakeClient:
-            return self
-
-        async def __aexit__(self, *_: Any) -> None:
-            return None
-
-        async def head(self, _: str) -> FakeResponse:
-            return FakeResponse(
-                200,
-                "https://example.edu/jobs/final",
-                history=[object()],
-            )
-
-    monkeypatch.setattr("app.jobs.redirects.httpx.AsyncClient", FakeClient)
-    result = asyncio.run(
-        execute_resolve_url_redirects(
-            {
-                "kind": "resolve_url_redirects",
-                "target_type": "discovery",
-                "target_id": "discovery-1",
-                "inputs_json": {"url": "https://example.edu/jobs/start"},
-            }
-        )
-    )
-    assert result["handled"] is True
-    assert result["resolved_url"] == "https://example.edu/jobs/final"
-    assert result["redirect_count"] == 1
-    assert result["status_code"] == 200
-
-
-def test_execute_job_routes_redirect_job_kind(monkeypatch) -> None:
-    async def _fake_redirect_handler(_: dict[str, Any], *, timeout_seconds: float) -> dict[str, Any]:
-        return {"handled": True, "kind": "resolve_url_redirects", "resolved_url": "https://example.edu/jobs/final"}
-
-    monkeypatch.setattr("app.jobs.executor.execute_resolve_url_redirects", _fake_redirect_handler)
-    result = asyncio.run(execute_job({"kind": "resolve_url_redirects", "target_type": "discovery", "target_id": "d1"}))
-    assert result["kind"] == "resolve_url_redirects"
-    assert result["resolved_url"] == "https://example.edu/jobs/final"
+    assert result["reason"] == "missing_url"
+    assert result["redirect_hop_count"] == 0

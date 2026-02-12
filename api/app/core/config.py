@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     otel_exporter_otlp_headers: str | None = None
     otel_trace_sample_ratio: float = 1.0
     otel_log_correlation: bool = True
+    url_normalization_overrides_json: str | None = None
 
     model_config = SettingsConfigDict(env_prefix="SJ_", extra="ignore")
 

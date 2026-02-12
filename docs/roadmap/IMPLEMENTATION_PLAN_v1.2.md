@@ -29,7 +29,7 @@
 | D2 | done | Expired-lease requeue endpoint exists and workers trigger it periodically; failed results now follow bounded retry then dead-letter transitions. |
 | D3 | in_progress | Worker runtime dispatches `check_freshness` with periodic scheduler-triggered enqueue; structured logging + OTel baseline instrumentation is now wired, with richer execution semantics still pending. |
 | E1 | in_progress | Base URL normalization/hash logic exists; per-domain override support is pending. |
-| E2 | in_progress | Redirect-resolution path is started: optional ingest enqueue (`SJ_ENABLE_REDIRECT_RESOLUTION_JOBS`), worker execution for `resolve_url_redirects`, and API result-apply updates for discovery canonical URL/hash plus extract replay enqueue when canonical fields change. |
+| E2 | in_progress | `resolve_url_redirects` worker execution path now resolves redirect chains and can persist resolved discovery URL/hash asynchronously when metadata-gated enqueue is enabled; default ingest routing and full E1 override productization remain pending. |
 | E3 | done | Dedupe scorer v1 now computes deterministic merge confidence from strong/medium/tie-break signals (URL/hash, text similarity, NER/contact-domain overlap). |
 | E4 | done | Merge policy routing now records machine decisions (`auto_merged`/`needs_review`/`rejected`), auto-applies high-confidence merges, and routes uncertain/conflicting matches to moderation with provenance. |
 | F1 | done | Moderation APIs now cover approve/reject (state patch), merge, and override flows with role checks + audit events. |
@@ -38,27 +38,30 @@
 | G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
 | G2 | done | Freshness scheduler endpoint + worker cadence now enqueue `check_freshness` jobs; result/dead-letter paths apply deterministic posting downgrade/archive transitions with provenance and integration coverage. |
 | H1 | in_progress | Minimal Next.js public shell exists; full catalogue UX pending. |
-| H2 | in_progress | Admin trust-policy console is wired to `GET/PUT/PATCH /admin/source-trust-policy`, and `/admin/cockpit` now covers candidate queue actions (`PATCH /candidates`, `POST /candidates/{id}/merge`, `POST /candidates/{id}/override`) plus modules/jobs operator flows (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) via Next.js proxy routes; maintenance actions now require explicit UI confirmation token, with further UX hardening pending. |
+| H2 | in_progress | Admin trust-policy console is wired to `GET/PUT/PATCH /admin/source-trust-policy`, and `/admin/cockpit` now covers candidate queue actions (`PATCH /candidates`, `POST /candidates/{id}/merge`, `POST /candidates/{id}/override`) plus modules/jobs operator flows (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) via Next.js proxy routes; UX hardening remains pending. |
 | I1 | not_started | TaskRouter abstraction not implemented. |
 | I2 | not_started | LiteLLM adapter not implemented. |
 | J1 | in_progress | OTel baseline is wired for API/workers (FastAPI + asyncpg + httpx spans, worker lifecycle spans, trace/log correlation, OTLP exporter-ready config); metric enrichment and staging sink validation remain pending. |
-| J2 | in_progress | Cloud Operations dashboard + alert policy artifacts are versioned under `docs/observability/`; environment binding runbook/docs (`docs/observability/ENVIRONMENT_BINDINGS.md`) are now in repo, while staging/prod imports and channel validation remain pending. |
+| J2 | in_progress | Cloud Operations dashboard + alert policy artifacts are versioned and now have environment-bindable templates/import scripts (`docs/observability/*.template.*`, `scripts/import-observability-assets.sh`); real staging/prod channel + label values still depend on secret bindings. |
 | K1 | not_started | Connector SDK package not implemented. |
 | K2 | not_started | RSS connector not implemented. |
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, freshness enqueue/dead-letter downgrade flow, moderation authz/state/merge/override, posting lifecycle patch transitions, and admin modules/jobs contract endpoints; web API-contract tests cover cockpit query/proxy path mapping plus admin proxy failure mapping (`4xx/5xx` passthrough, `limit` bounds pass-through, non-JSON backend `{detail}` shaping); Playwright covers mocked + live cockpit flows including maintenance-confirmation guardrails, happy path, merge-conflict rendering, backend `401`/`403`/`422` negatives, and persistence assertions for candidate/module/job operations; `web-e2e-live` CI runtime uses cache-backed dependencies/browsers with explicit timeout budgets and scoped retry. |
+| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, freshness enqueue/dead-letter downgrade flow, moderation authz/state/merge/override, posting lifecycle patch transitions, and admin modules/jobs contract endpoints; web API-contract tests cover cockpit query/proxy path mapping plus admin proxy failure mapping (`4xx/5xx` passthrough, `limit` bounds pass-through, non-JSON backend `{detail}` shaping); Playwright covers both mocked cockpit UI contracts and live backend-driven cockpit flows (happy path, merge-conflict rendering, backend `401`/`403`/`422` negatives, plus persistence assertions for candidate events/module mutations/job enqueue-reap transitions); `web-e2e-live` CI runtime uses cache-backed dependencies/browsers with explicit timeout budgets and scoped retry. |
 | L2 | not_started | Load/perf testing not implemented. |
-| M1 | in_progress | Quality CI is split into fast and DB-backed integration checks, with explicit `migration-safety` and `deploy-readiness-gate` jobs; environment-specific deploy execution workflow (`.github/workflows/deploy.yml`) is now added, pending concrete secret binding + first staging/production runs. |
+| M1 | in_progress | Quality CI is split into fast and DB-backed integration checks with explicit `migration-safety` + `deploy-readiness-gate`, and a staged `deploy.yml` workflow now binds env-specific secrets/commands; first live staging/prod executions remain pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
 
 ## Next Implementation Steps (Priority Order)
 
-1. Validate OTLP sink + telemetry quality in staging (`J1`) using the new environment-binding checklist.
-2. Bind and verify dashboard/alert imports with real notification channels in staging/production (`J2`).
-3. Bind deploy workflow secrets and execute first staging + production deploy runs (`M1`).
-4. Continue `H2`/`L1` moderation-admin scenario breadth and deepen `E2` redirect-resolution semantics beyond v0 rollout.
+1. Close remaining `J1/J2/M1` environment bindings after baseline merge:
+- Validate OTLP sink + telemetry quality in staging (`J1`).
+- Bind dashboard/alert policies to production metric labels and notification channels (`J2`).
+- Add environment-specific deploy execution workflow behind existing `deploy-readiness-gate` (`M1`).
+2. Continue `H2` cockpit hardening around operator ergonomics and guardrails while preserving existing API contracts.
+3. Keep full moderation/admin E2E under `L1` as the primary remaining coverage gap.
+4. Start `E2` redirect-resolution async job path (`resolve_url_redirects`) to close the remaining Phase-2 P0 gap.
 
 ## Workstreams and Task Graph
 

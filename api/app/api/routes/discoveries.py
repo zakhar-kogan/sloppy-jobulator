@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.security import get_machine_principal
-from app.core.urls import canonical_hash, normalize_url
 from app.core.config import get_settings
+from app.core.security import get_machine_principal
+from app.core.urls import canonical_hash, normalize_url, parse_normalization_overrides
 from app.schemas.discoveries import DiscoveryAccepted, DiscoveryEvent
 from app.services.repository import (
     RepositoryConflictError,
@@ -19,13 +19,13 @@ async def create_discovery(
     principal=Depends(get_machine_principal),
     repository=Depends(get_repository),
 ) -> DiscoveryAccepted:
-    settings = get_settings()
-
     try:
         principal.require_scopes({"discoveries:write"})
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
+    settings = get_settings()
+    normalization_overrides = parse_normalization_overrides(settings.url_normalization_overrides_json)
     if not principal.actor_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid machine principal")
     if payload.origin_module_id != principal.subject:
@@ -34,8 +34,9 @@ async def create_discovery(
             detail="origin_module_id must match authenticated module",
         )
 
-    normalized = normalize_url(payload.url) if payload.url else None
+    normalized = normalize_url(payload.url, overrides=normalization_overrides) if payload.url else None
     hashed = canonical_hash(normalized) if normalized else None
+    enqueue_redirect_resolution = bool(payload.metadata.get("resolve_redirects"))
 
     try:
         discovery_id = await repository.create_discovery_and_enqueue_extract(
@@ -49,7 +50,7 @@ async def create_discovery(
             text_hint=payload.text_hint,
             metadata=payload.metadata,
             actor_module_db_id=principal.actor_id,
-            enqueue_redirect_resolution=settings.enable_redirect_resolution_jobs,
+            enqueue_redirect_resolution=enqueue_redirect_resolution,
         )
     except RepositoryUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc

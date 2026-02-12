@@ -514,3 +514,98 @@ test("cockpit clamps filter and maintenance limits to backend contract bounds", 
   const lastEnqueueQuery = enqueueQueries.at(-1) ?? "";
   expect(lastEnqueueQuery).toContain("limit=1000");
 });
+
+test("candidate queue pagination and cross-flow actions target the selected row", async ({ page }) => {
+  const startedAt = "2026-02-10T20:02:39.338252Z";
+  const candidates: CandidateRecord[] = [
+    {
+      id: "11111111-1111-1111-1111-111111111111",
+      state: "needs_review",
+      dedupe_confidence: 0.81,
+      risk_flags: [],
+      extracted_fields: { title: "First Candidate" },
+      discovery_ids: ["d-1"],
+      posting_id: null,
+      created_at: startedAt,
+      updated_at: startedAt
+    },
+    {
+      id: "22222222-2222-2222-2222-222222222222",
+      state: "needs_review",
+      dedupe_confidence: 0.83,
+      risk_flags: ["manual_review_needed"],
+      extracted_fields: { title: "Second Candidate" },
+      discovery_ids: ["d-2"],
+      posting_id: null,
+      created_at: startedAt,
+      updated_at: startedAt
+    },
+    {
+      id: "33333333-3333-3333-3333-333333333333",
+      state: "publishable",
+      dedupe_confidence: 0.92,
+      risk_flags: [],
+      extracted_fields: { title: "Third Candidate" },
+      discovery_ids: ["d-3"],
+      posting_id: null,
+      created_at: startedAt,
+      updated_at: startedAt
+    }
+  ];
+  const candidateQueries: string[] = [];
+  const patchTargets: string[] = [];
+
+  await page.route(/\/api\/admin\/candidates(?:\?.*)?$/, async (route) => {
+    const url = new URL(route.request().url());
+    candidateQueries.push(url.searchParams.toString());
+    const state = url.searchParams.get("state");
+    const limit = Number(url.searchParams.get("limit") ?? "50");
+    const offset = Number(url.searchParams.get("offset") ?? "0");
+    const filtered = state && state !== "all" ? candidates.filter((candidate) => candidate.state === state) : candidates;
+    return jsonResponse(route, filtered.slice(offset, offset + limit));
+  });
+  await page.route(/\/api\/admin\/candidates\/[^/?]+(?:\?.*)?$/, async (route) => {
+    patchTargets.push(route.request().url());
+    const targetId = route.request().url().split("/").at(-1)?.split("?")[0] ?? "";
+    const body = route.request().postDataJSON() as { state: CandidateState };
+    const target = candidates.find((candidate) => candidate.id === targetId);
+    if (!target) {
+      return route.fulfill({ status: 404 });
+    }
+    target.state = body.state;
+    return jsonResponse(route, target);
+  });
+  await page.route(/\/api\/admin\/modules(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+  await page.route(/\/api\/admin\/jobs(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+
+  const candidateFilters = page.locator("article:has(h2:text-is('Candidate Queue Filters'))");
+  await candidateFilters.getByLabel("State").selectOption("needs_review");
+  await candidateFilters.getByLabel("Limit").fill("1");
+  await candidateFilters.getByLabel("Offset").fill("1");
+  await candidateFilters.getByRole("button", { name: "Refresh Candidates" }).click();
+
+  const secondRow = page
+    .locator("article:has(h2:text-is('Candidate Queue')) tbody tr")
+    .filter({ hasText: "22222222-2222-2222-2222-222222222222" });
+  await expect(secondRow).toHaveCount(1);
+  await secondRow.getByRole("button", { name: /Select|Selected/ }).click();
+  await expect(page.locator("article:has(h2:text-is('Selected Candidate Actions'))")).toContainText(
+    "22222222-2222-2222-2222-222222222222",
+  );
+
+  const patchForm = page.locator("article:has(h2:text-is('Selected Candidate Actions')) form").nth(0);
+  await patchForm.getByLabel("State").selectOption("publishable");
+  await patchForm.getByLabel("Reason").fill("pagination cross-flow patch");
+  await patchForm.getByRole("button", { name: "Apply State Patch" }).click();
+  await expect(page.getByText("Candidate patch action completed for 22222222-2222-2222-2222-222222222222.")).toBeVisible();
+
+  const lastCandidatesQuery = candidateQueries.at(-1) ?? "";
+  expect(lastCandidatesQuery).toContain("state=needs_review");
+  expect(lastCandidatesQuery).toContain("limit=1");
+  expect(lastCandidatesQuery).toContain("offset=1");
+  const patchedTarget = patchTargets.at(-1) ?? "";
+  expect(patchedTarget).toContain("/api/admin/candidates/22222222-2222-2222-2222-222222222222");
+});

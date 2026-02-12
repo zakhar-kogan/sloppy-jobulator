@@ -15,8 +15,8 @@ class URLNormalizationOverride(TypedDict):
     force_https: bool
 
 
-def _is_tracking_param(key: str) -> bool:
-    return key.startswith("utm_") or key in TRACKING_KEYS
+def canonical_hash(normalized_url: str) -> str:
+    return hashlib.sha256(normalized_url.encode("utf-8")).hexdigest()
 
 
 def parse_normalization_overrides(raw: str | None) -> dict[str, URLNormalizationOverride]:
@@ -47,12 +47,10 @@ def parse_normalization_overrides(raw: str | None) -> dict[str, URLNormalization
 
 
 def normalize_url(raw_url: str, *, overrides: dict[str, URLNormalizationOverride] | None = None) -> str:
-    """Conservative URL normalization used for idempotency and dedupe seeds."""
     parsed = urlparse(raw_url.strip())
 
     scheme = parsed.scheme.lower()
     netloc = parsed.netloc.lower()
-
     host = netloc
     port = ""
     if ":" in netloc:
@@ -79,18 +77,17 @@ def normalize_url(raw_url: str, *, overrides: dict[str, URLNormalizationOverride
     ]
     filtered_query_pairs.sort(key=lambda pair: pair[0])
     query = urlencode(filtered_query_pairs, doseq=True)
-
     return urlunparse((scheme, netloc, path, "", query, ""))
-
-
-def canonical_hash(normalized_url: str) -> str:
-    return hashlib.sha256(normalized_url.encode("utf-8")).hexdigest()
 
 
 def _coerce_lower_str_set(value: Any) -> set[str]:
     if not isinstance(value, list):
         return set()
     return {item.strip().lower() for item in value if isinstance(item, str) and item.strip()}
+
+
+def _is_tracking_param(key: str) -> bool:
+    return key.startswith("utm_") or key in TRACKING_KEYS
 
 
 def _match_override(host: str, overrides: dict[str, URLNormalizationOverride]) -> URLNormalizationOverride | None:

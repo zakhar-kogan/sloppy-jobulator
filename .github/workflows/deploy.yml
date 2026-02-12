@@ -1,175 +1,157 @@
 name: Deploy
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       environment:
-        description: "Target deployment environment"
+        description: "Deployment environment"
         required: true
-        default: "staging"
         type: choice
         options:
           - staging
-          - production
+          - prod
+      run_observability_import:
+        description: "Bind and import dashboard/alerts after deploy"
+        required: true
+        type: boolean
+        default: true
+      run_telemetry_validation:
+        description: "Run telemetry quality validation after deploy"
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
   id-token: write
 
 jobs:
-  resolve-context:
+  deploy-staging:
+    if: github.event.inputs.environment == 'staging'
     runs-on: ubuntu-latest
-    outputs:
-      should_run: ${{ steps.context.outputs.should_run }}
-      environment: ${{ steps.context.outputs.environment }}
-    steps:
-      - name: Resolve deploy context
-        id: context
-        run: |
-          SHOULD_RUN=false
-          ENVIRONMENT=staging
-
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            SHOULD_RUN=true
-            ENVIRONMENT="${{ github.event.inputs.environment }}"
-          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            if [[ "${{ github.event.workflow_run.conclusion }}" == "success" && "${{ github.event.workflow_run.head_branch }}" == "main" ]]; then
-              SHOULD_RUN=true
-              ENVIRONMENT=production
-            fi
-          fi
-
-          echo "should_run=${SHOULD_RUN}" >> "$GITHUB_OUTPUT"
-          echo "environment=${ENVIRONMENT}" >> "$GITHUB_OUTPUT"
-
-  deploy-api-workers:
-    needs: resolve-context
-    if: needs.resolve-context.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
-    environment: ${{ needs.resolve-context.outputs.environment }}
+    environment: staging
     env:
-      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-      GCP_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-      GCP_REGION: ${{ secrets.GCP_REGION }}
-      CLOUD_RUN_API_SERVICE: ${{ secrets.CLOUD_RUN_API_SERVICE }}
-      CLOUD_RUN_WORKER_JOB: ${{ secrets.CLOUD_RUN_WORKER_JOB }}
-      DATABASE_URL: ${{ secrets.SJ_DATABASE_URL }}
+      GCP_PROJECT_ID: ${{ secrets.SJ_GCP_PROJECT_ID_STAGING }}
+      SJ_OBS_ENVIRONMENT: staging
+      SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_STAGING }}
+      SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_STAGING }}
+      SJ_OBS_NOTIFICATION_CHANNELS: ${{ secrets.SJ_NOTIFICATION_CHANNELS_STAGING }}
+      SJ_API_BASE_URL: ${{ secrets.SJ_API_BASE_URL_STAGING }}
+      SJ_DEPLOY_API_CMD: ${{ secrets.SJ_DEPLOY_API_CMD_STAGING }}
+      SJ_DEPLOY_WORKER_CMD: ${{ secrets.SJ_DEPLOY_WORKER_CMD_STAGING }}
+      SJ_DEPLOY_WEB_CMD: ${{ secrets.SJ_DEPLOY_WEB_CMD_STAGING }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate deploy bindings
-        id: validate
+      - name: Validate staging secret bindings
         run: |
-          missing=0
-          for var in GCP_WORKLOAD_IDENTITY_PROVIDER GCP_SERVICE_ACCOUNT_EMAIL GCP_PROJECT_ID GCP_REGION CLOUD_RUN_API_SERVICE CLOUD_RUN_WORKER_JOB DATABASE_URL; do
-            if [[ -z "${!var}" ]]; then
-              echo "Missing required secret: ${var}"
-              missing=1
+          required=(
+            GCP_PROJECT_ID
+            SJ_OBS_API_CLOUD_RUN_SERVICE
+            SJ_OBS_WORKER_OTEL_SERVICE
+            SJ_OBS_NOTIFICATION_CHANNELS
+            SJ_API_BASE_URL
+            SJ_DEPLOY_API_CMD
+            SJ_DEPLOY_WORKER_CMD
+            SJ_DEPLOY_WEB_CMD
+          )
+          for var_name in "${required[@]}"; do
+            if [ -z "${!var_name}" ]; then
+              echo "missing required binding: ${var_name}" >&2
+              exit 1
             fi
           done
-          if [[ "$missing" -eq 1 ]]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to Google Cloud
-        if: steps.validate.outputs.ready == 'true'
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_SERVICE_ACCOUNT_EMAIL }}
+          workload_identity_provider: ${{ secrets.SJ_GCP_WORKLOAD_IDENTITY_PROVIDER_STAGING }}
+          service_account: ${{ secrets.SJ_GCP_SERVICE_ACCOUNT_STAGING }}
 
       - name: Setup gcloud
-        if: steps.validate.outputs.ready == 'true'
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Migration safety gate (deploy env)
-        if: steps.validate.outputs.ready == 'true'
-        run: bash scripts/migration-safety-gate.sh
+      - name: Deploy API
+        run: bash -lc "${SJ_DEPLOY_API_CMD}"
 
-      - name: Deploy API service
-        if: steps.validate.outputs.ready == 'true'
-        run: |
-          gcloud run deploy "$CLOUD_RUN_API_SERVICE" \
-            --project "$GCP_PROJECT_ID" \
-            --region "$GCP_REGION" \
-            --source ./api \
-            --set-env-vars "SJ_DATABASE_URL=${DATABASE_URL}" \
-            --quiet
+      - name: Deploy Workers
+        run: bash -lc "${SJ_DEPLOY_WORKER_CMD}"
 
-      - name: Deploy worker job
-        if: steps.validate.outputs.ready == 'true'
-        run: |
-          gcloud run jobs deploy "$CLOUD_RUN_WORKER_JOB" \
-            --project "$GCP_PROJECT_ID" \
-            --region "$GCP_REGION" \
-            --source ./workers \
-            --set-env-vars "SJ_WORKER_API_BASE_URL=https://${CLOUD_RUN_API_SERVICE}-${GCP_REGION}.a.run.app" \
-            --quiet
+      - name: Deploy Web
+        run: bash -lc "${SJ_DEPLOY_WEB_CMD}"
 
-      - name: Deployment skipped summary
-        if: steps.validate.outputs.ready != 'true'
-        run: echo "API/worker deploy skipped: required environment secrets are not bound."
+      - name: Import observability assets
+        if: github.event.inputs.run_observability_import == 'true'
+        run: bash scripts/import-observability-assets.sh
 
-  deploy-web:
-    needs: resolve-context
-    if: needs.resolve-context.outputs.should_run == 'true'
+      - name: Validate telemetry quality
+        if: github.event.inputs.run_telemetry_validation == 'true'
+        run: bash scripts/validate-telemetry-quality.sh
+
+  deploy-prod:
+    if: github.event.inputs.environment == 'prod' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: ${{ needs.resolve-context.outputs.environment }}
+    environment: production
     env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      TARGET_ENVIRONMENT: ${{ needs.resolve-context.outputs.environment }}
+      GCP_PROJECT_ID: ${{ secrets.SJ_GCP_PROJECT_ID_PROD }}
+      SJ_OBS_ENVIRONMENT: prod
+      SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_PROD }}
+      SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_PROD }}
+      SJ_OBS_NOTIFICATION_CHANNELS: ${{ secrets.SJ_NOTIFICATION_CHANNELS_PROD }}
+      SJ_API_BASE_URL: ${{ secrets.SJ_API_BASE_URL_PROD }}
+      SJ_DEPLOY_API_CMD: ${{ secrets.SJ_DEPLOY_API_CMD_PROD }}
+      SJ_DEPLOY_WORKER_CMD: ${{ secrets.SJ_DEPLOY_WORKER_CMD_PROD }}
+      SJ_DEPLOY_WEB_CMD: ${{ secrets.SJ_DEPLOY_WEB_CMD_PROD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Validate prod secret bindings
+        run: |
+          required=(
+            GCP_PROJECT_ID
+            SJ_OBS_API_CLOUD_RUN_SERVICE
+            SJ_OBS_WORKER_OTEL_SERVICE
+            SJ_OBS_NOTIFICATION_CHANNELS
+            SJ_API_BASE_URL
+            SJ_DEPLOY_API_CMD
+            SJ_DEPLOY_WORKER_CMD
+            SJ_DEPLOY_WEB_CMD
+          )
+          for var_name in "${required[@]}"; do
+            if [ -z "${!var_name}" ]; then
+              echo "missing required binding: ${var_name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
         with:
-          node-version-file: ".node-version"
+          workload_identity_provider: ${{ secrets.SJ_GCP_WORKLOAD_IDENTITY_PROVIDER_PROD }}
+          service_account: ${{ secrets.SJ_GCP_SERVICE_ACCOUNT_PROD }}
 
-      - name: Enable Corepack
-        run: corepack enable
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Validate Vercel bindings
-        id: validate
-        run: |
-          if [[ -z "$VERCEL_TOKEN" || -z "$VERCEL_ORG_ID" || -z "$VERCEL_PROJECT_ID" ]]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Deploy API
+        run: bash -lc "${SJ_DEPLOY_API_CMD}"
 
-      - name: Install web deps
-        if: steps.validate.outputs.ready == 'true'
-        run: pnpm install --dir web --frozen-lockfile
+      - name: Deploy Workers
+        run: bash -lc "${SJ_DEPLOY_WORKER_CMD}"
 
-      - name: Build web
-        if: steps.validate.outputs.ready == 'true'
-        run: pnpm --dir web build
+      - name: Deploy Web
+        run: bash -lc "${SJ_DEPLOY_WEB_CMD}"
 
-      - name: Deploy web with Vercel
-        if: steps.validate.outputs.ready == 'true'
-        run: |
-          args=()
-          if [[ "$TARGET_ENVIRONMENT" == "production" ]]; then
-            args+=(--prod)
-          fi
-          npx vercel deploy "${args[@]}" \
-            --cwd web \
-            --yes \
-            --token "$VERCEL_TOKEN"
+      - name: Import observability assets
+        if: github.event.inputs.run_observability_import == 'true'
+        run: bash scripts/import-observability-assets.sh
 
-      - name: Deployment skipped summary
-        if: steps.validate.outputs.ready != 'true'
-        run: echo "Web deploy skipped: required Vercel secrets are not bound."
+      - name: Validate telemetry quality
+        if: github.event.inputs.run_telemetry_validation == 'true'
+        run: bash scripts/validate-telemetry-quality.sh

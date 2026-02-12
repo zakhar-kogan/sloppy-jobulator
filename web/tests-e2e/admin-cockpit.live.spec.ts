@@ -530,6 +530,62 @@ test("cockpit live applies operator guardrails for patch transitions and reasone
     .toBe("rejected");
 });
 
+test("cockpit live queue pagination drives patch action against selected candidate", async ({ page, request }) => {
+  const suffix = uniqueSuffix();
+  await createDiscoveryAndProcess(
+    request,
+    `live-pagination-a-${suffix}`,
+    `live-pagination-a-${suffix}`,
+    `Live Pagination A ${suffix}`,
+    false,
+  );
+  await createDiscoveryAndProcess(
+    request,
+    `live-pagination-b-${suffix}`,
+    `live-pagination-b-${suffix}`,
+    `Live Pagination B ${suffix}`,
+    false,
+  );
+  await createDiscoveryAndProcess(
+    request,
+    `live-pagination-c-${suffix}`,
+    `live-pagination-c-${suffix}`,
+    `Live Pagination C ${suffix}`,
+    false,
+  );
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+
+  const queueFilters = page.locator("article:has(h2:text-is('Candidate Queue Filters'))");
+  await queueFilters.getByLabel("State").selectOption("needs_review");
+  await queueFilters.getByLabel("Limit").fill("1");
+  await queueFilters.getByLabel("Offset").fill("1");
+  await queueFilters.getByRole("button", { name: "Refresh Candidates" }).click();
+
+  const expectedPageCandidates = await listCandidates(request, "state=needs_review&limit=1&offset=1");
+  expect(expectedPageCandidates.length).toBe(1);
+  const selectedCandidateId = expectedPageCandidates[0].id;
+
+  const candidateTable = page.locator("article:has(h2:text-is('Candidate Queue'))");
+  const candidateRow = candidateTable.locator("tbody tr").filter({ hasText: selectedCandidateId });
+  await expect(candidateRow).toHaveCount(1);
+
+  await candidateRow.getByRole("button", { name: /Select|Selected/ }).click();
+  const patchForm = page.locator("article:has(h2:text-is('Selected Candidate Actions')) form").nth(0);
+  await patchForm.getByLabel("State").selectOption("publishable");
+  await patchForm.getByLabel("Reason").fill("live pagination patch");
+  await patchForm.getByRole("button", { name: "Apply State Patch" }).click();
+  await expect(page.getByText(`Candidate patch action completed for ${selectedCandidateId}.`)).toBeVisible();
+
+  await expect
+    .poll(async () => {
+      const publishable = await listCandidates(request, "state=publishable&limit=100");
+      return publishable.some((candidate) => candidate.id === selectedCandidateId);
+    })
+    .toBeTruthy();
+});
+
 test("cockpit live backend rejects non-admin and invalid requests", async ({ request }) => {
   const suffix = uniqueSuffix();
   const seeded = await createDiscoveryAndProcess(
