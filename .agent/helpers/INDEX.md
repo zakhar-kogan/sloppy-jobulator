@@ -13,6 +13,7 @@ Machine-facing helper memory for recurring failures and repeatable workflows.
 
 ## Active Helpers
 - `H-2026-02-10__db-integration-escalation` — `Status:ACTIVE` — `Path:.agent/helpers/H-2026-02-10__db-integration-escalation.md` — `Scope:Local DB-backed pytest runs from sandboxed Codex sessions` — `Summary:Use /tmp uv cache + escalation fallback when sandbox blocks localhost Postgres access.`
+- `H-2026-02-12__async-resource-loop-lifecycle` — `Status:ACTIVE` — `Path:.agent/helpers/H-2026-02-12__async-resource-loop-lifecycle.md` — `Scope:Async DB/client tests using pooled resources` — `Summary:Create/use/close async pools within one event loop to avoid loop-closed teardown failures.`
 
 ## Stable Helpers
 - (none yet)

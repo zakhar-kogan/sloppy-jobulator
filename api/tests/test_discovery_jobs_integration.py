@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 import app.core.security as security
 from app.core.config import get_settings
+from app.core.urls import canonical_hash, normalize_url
 from app.main import app
 from app.services.repository import (
     PostgresRepository,
@@ -220,6 +221,172 @@ def test_discovery_idempotency_does_not_duplicate_job(api_client: TestClient) ->
     jobs = jobs_response.json()
     assert len(jobs) == 1
     assert jobs[0]["target_id"] == first_discovery_id
+
+
+def test_redirect_resolution_job_enqueued_when_flag_enabled(database_url: str) -> None:
+    settings = get_settings()
+    repository = PostgresRepository(
+        database_url=database_url,
+        min_pool_size=settings.database_pool_min_size,
+        max_pool_size=settings.database_pool_max_size,
+        job_max_attempts=settings.job_max_attempts,
+        job_retry_base_seconds=settings.job_retry_base_seconds,
+        job_retry_max_seconds=settings.job_retry_max_seconds,
+        freshness_check_interval_hours=settings.freshness_check_interval_hours,
+        freshness_stale_after_hours=settings.freshness_stale_after_hours,
+        freshness_archive_after_hours=settings.freshness_archive_after_hours,
+        enable_redirect_resolution_jobs=True,
+    )
+    origin_module_db_id = _run(_fetchval(database_url, "select id::text from modules where module_id = 'local-connector'"))
+    assert isinstance(origin_module_db_id, str)
+
+    async def _run_scenario() -> list[Any]:
+        try:
+            discovery_id = await repository.create_discovery_and_enqueue_extract(
+                origin_module_db_id=origin_module_db_id,
+                external_id="ext-redirect-enqueue-1",
+                discovered_at=datetime.now(timezone.utc),
+                url="https://example.edu/jobs/redirect-enqueue?utm_source=feed",
+                normalized_url=normalize_url("https://example.edu/jobs/redirect-enqueue?utm_source=feed"),
+                canonical_hash=canonical_hash(normalize_url("https://example.edu/jobs/redirect-enqueue?utm_source=feed")),
+                title_hint="Redirect enqueue seed",
+                text_hint="integration seed",
+                metadata={"source": "integration-test"},
+                actor_module_db_id=origin_module_db_id,
+                enqueue_redirect_resolution=True,
+            )
+            return await _fetch(
+                database_url,
+                """
+                select kind::text
+                from jobs
+                where target_type = 'discovery'
+                  and target_id = $1::uuid
+                order by kind asc
+                """,
+                discovery_id,
+            )
+        finally:
+            await repository.close()
+
+    job_kinds = _run(_run_scenario())
+    assert job_kinds == ["extract", "resolve_url_redirects"]
+
+
+def test_resolve_redirect_job_result_updates_discovery_and_enqueues_extract(api_client: TestClient, database_url: str) -> None:
+    discovery_id = _run(
+        _fetchval(
+            database_url,
+            """
+            insert into discoveries (
+              origin_module_id,
+              external_id,
+              discovered_at,
+              url,
+              normalized_url,
+              canonical_hash,
+              title_hint,
+              text_hint,
+              metadata
+            )
+            values (
+              (select id from modules where module_id = 'local-connector'),
+              'ext-redirect-apply-1',
+              now(),
+              'https://example.edu/jobs/start?utm_source=feed',
+              $1,
+              $2,
+              'redirect apply seed',
+              'redirect apply seed',
+              '{}'::jsonb
+            )
+            returning id::text
+            """,
+            normalize_url("https://example.edu/jobs/start?utm_source=feed"),
+            canonical_hash(normalize_url("https://example.edu/jobs/start?utm_source=feed")),
+        )
+    )
+    _run(
+        _execute(
+            database_url,
+            """
+            insert into jobs (kind, target_type, target_id, inputs_json)
+            values (
+              'resolve_url_redirects',
+              'discovery',
+              $1::uuid,
+              jsonb_build_object(
+                'discovery_id', $1::text,
+                'url', 'https://example.edu/jobs/start?utm_source=feed'
+              )
+            )
+            """,
+            discovery_id,
+        )
+    )
+
+    jobs_response = api_client.get("/jobs", headers=PROCESSOR_HEADERS)
+    assert jobs_response.status_code == 200
+    queued_jobs = jobs_response.json()
+    redirect_job = next(job for job in queued_jobs if job["kind"] == "resolve_url_redirects")
+
+    claim_response = api_client.post(
+        f"/jobs/{redirect_job['id']}/claim",
+        json={"lease_seconds": 120},
+        headers=PROCESSOR_HEADERS,
+    )
+    assert claim_response.status_code == 200
+
+    resolved_url = "https://example.edu/jobs/final?utm_medium=email&utm_source=feed"
+    result_response = api_client.post(
+        f"/jobs/{redirect_job['id']}/result",
+        json={
+            "status": "done",
+            "result_json": {
+                "resolved_url": resolved_url,
+                "status_code": 200,
+                "redirect_count": 1,
+            },
+        },
+        headers=PROCESSOR_HEADERS,
+    )
+    assert result_response.status_code == 200
+    assert result_response.json()["status"] == "done"
+
+    updated_discovery = _run(
+        _fetchrow(
+            database_url,
+            """
+            select
+              url,
+              normalized_url,
+              canonical_hash
+            from discoveries
+            where id = $1::uuid
+            """,
+            discovery_id,
+        )
+    )
+    expected_normalized = normalize_url(resolved_url)
+    assert updated_discovery["url"] == resolved_url
+    assert updated_discovery["normalized_url"] == expected_normalized
+    assert updated_discovery["canonical_hash"] == canonical_hash(expected_normalized)
+
+    extract_jobs = _run(
+        _fetchval(
+            database_url,
+            """
+            select count(*)
+            from jobs
+            where kind = 'extract'
+              and target_type = 'discovery'
+              and target_id = $1::uuid
+              and status = 'queued'
+            """,
+            discovery_id,
+        )
+    )
+    assert extract_jobs == 1
 
 
 def test_expired_claimed_jobs_are_requeued(api_client: TestClient, database_url: str) -> None:
@@ -2846,6 +3013,7 @@ async def _upsert_source_trust_policy(
         freshness_check_interval_hours=settings.freshness_check_interval_hours,
         freshness_stale_after_hours=settings.freshness_stale_after_hours,
         freshness_archive_after_hours=settings.freshness_archive_after_hours,
+        enable_redirect_resolution_jobs=False,
     )
     try:
         await repository.upsert_source_trust_policy(
@@ -2863,6 +3031,25 @@ async def _fetchval(database_url: str, query: str, *args: Any) -> Any:
     conn = await asyncpg.connect(database_url)
     try:
         return await conn.fetchval(query, *args)
+    finally:
+        await conn.close()
+
+
+async def _fetchrow(database_url: str, query: str, *args: Any) -> asyncpg.Record:
+    conn = await asyncpg.connect(database_url)
+    try:
+        row = await conn.fetchrow(query, *args)
+        assert row is not None
+        return row
+    finally:
+        await conn.close()
+
+
+async def _fetch(database_url: str, query: str, *args: Any) -> list[Any]:
+    conn = await asyncpg.connect(database_url)
+    try:
+        rows = await conn.fetch(query, *args)
+        return [row[0] for row in rows]
     finally:
         await conn.close()
 

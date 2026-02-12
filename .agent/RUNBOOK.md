@@ -255,6 +255,8 @@ limit 20;
 5. Cloud Operations assets:
 - Dashboard: `docs/observability/cloud-monitoring-dashboard.json`
 - Alert policies: `docs/observability/alert-policies.yaml`
+6. Environment bindings:
+- Use `docs/observability/ENVIRONMENT_BINDINGS.md` for staging/production project labels, notification channels, and OTLP endpoint wiring.
 6. Import commands:
 ```bash
 gcloud monitoring dashboards create \
@@ -274,6 +276,18 @@ gcloud alpha monitoring policies create \
 - Workflow `CI` job `migration-safety` runs on PR and push for explicit migration safety validation.
 3. Deploy readiness gate:
 - Workflow `CI` job `deploy-readiness-gate` runs only on `push` to `main` and requires all quality + migration jobs to pass before signaling deploy readiness.
+4. Deploy execution workflow:
+- Workflow `Deploy` (`.github/workflows/deploy.yml`) runs on successful `CI` workflow completion for `main`, or manually via `workflow_dispatch` with `environment` input (`staging|production`).
+- Required environment secrets for API/workers: `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT_EMAIL`, `GCP_PROJECT_ID`, `GCP_REGION`, `CLOUD_RUN_API_SERVICE`, `CLOUD_RUN_WORKER_JOB`, `SJ_DATABASE_URL`.
+- Required environment secrets for web: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
+- Deploy jobs skip safely (with summary) when required secrets are not bound.
+
+## E2 Redirect-Resolution v0
+1. Feature flag:
+- `SJ_ENABLE_REDIRECT_RESOLUTION_JOBS` (default `false`) controls ingest-time enqueue of `resolve_url_redirects`.
+2. Behavior when enabled:
+- Discovery ingest enqueues both `extract` and `resolve_url_redirects` jobs.
+- Completed redirect jobs may update discovery `url`/`normalized_url`/`canonical_hash`; if canonical fields changed and no pending extract job exists, a replay `extract` job is enqueued.
 
 ## Incident basics
 1. Health check endpoint/command: `GET /healthz` on API.

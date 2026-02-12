@@ -84,6 +84,7 @@ Configure branch protection to require these CI jobs:
 This keeps fast checks and DB-backed integration checks as separate required gates.
 
 On `push` to `main`, CI also runs `deploy-readiness-gate` after all quality + migration gates pass.
+When CI passes on `main`, the `Deploy` workflow can execute environment-bound deploy jobs (or be run manually via `workflow_dispatch` for staging/production).
 
 ## Human Role Bootstrap (A3)
 
@@ -130,3 +131,11 @@ API (`SJ_` prefix) and workers (`SJ_WORKER_` prefix) support:
 - `OTEL_LOG_CORRELATION` (default `true`)
 
 J2 dashboard and alert artifacts live under `docs/observability/`.
+Environment binding checklist/examples (service labels, notification channels, OTLP endpoints) live under `docs/observability/ENVIRONMENT_BINDINGS.md`.
+
+## Redirect Resolution Rollout (E2 v0)
+
+Redirect-resolution enqueue is available behind a feature flag:
+- `SJ_ENABLE_REDIRECT_RESOLUTION_JOBS` (default `false`).
+
+When enabled, discovery ingest enqueues `resolve_url_redirects` jobs in addition to `extract`, and completed redirect jobs can refresh discovery canonical URL/hash and enqueue a follow-up `extract` replay if canonical fields changed.

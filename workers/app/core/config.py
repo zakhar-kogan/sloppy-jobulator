@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     lease_reaper_batch_size: int = 100
     freshness_enqueue_interval_seconds: float = 300.0
     freshness_enqueue_batch_size: int = 100
+    redirect_resolution_timeout_seconds: float = 10.0
     otel_enabled: bool = True
     otel_service_name: str = "sloppy-jobulator-workers"
     otel_exporter_otlp_endpoint: str | None = None
