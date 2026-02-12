@@ -5,7 +5,7 @@
 - Complexity: `S` (1-2 days), `M` (3-5 days), `L` (1-2 weeks), `XL` (2+ weeks).
 - Order: lower number means earlier on optimal critical path.
 
-## Status Snapshot (2026-02-10)
+## Status Snapshot (2026-02-12)
 
 ### Status legend
 - `done`: implemented and validated in current repo/CI.
@@ -55,8 +55,13 @@
 
 ## Next Implementation Steps (Priority Order)
 
-1. Continue `H2` cockpit hardening around operator ergonomics and guardrails while preserving existing API contracts.
-- Keep full moderation/admin E2E under `L1` as the primary remaining coverage gap.
+1. Close remaining `J1/J2/M1` environment bindings after baseline merge:
+- Validate OTLP sink + telemetry quality in staging (`J1`).
+- Bind dashboard/alert policies to production metric labels and notification channels (`J2`).
+- Add environment-specific deploy execution workflow behind existing `deploy-readiness-gate` (`M1`).
+2. Continue `H2` cockpit hardening around operator ergonomics and guardrails while preserving existing API contracts.
+3. Keep full moderation/admin E2E under `L1` as the primary remaining coverage gap.
+4. Start `E2` redirect-resolution async job path (`resolve_url_redirects`) to close the remaining Phase-2 P0 gap.
 
 ## Workstreams and Task Graph
 
