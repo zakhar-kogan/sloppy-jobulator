@@ -26,6 +26,7 @@
 23. Prefer scoped retry at CI step/job level for known startup flakes; keep per-test retries disabled for deterministic contract failures.
 24. Clamp UI numeric filters/limits to backend contract bounds before request dispatch, and verify both helper-level coercion and browser-level emitted query params.
 24. For moderation/admin UIs, mirror backend transition guards in shared frontend utilities and drive selectable action states from those utilities to prevent policy drift and avoid avoidable `409` user paths.
+25. For first-pass OTel adoption, instrument service edges (FastAPI/worker lifecycle + db/http client hooks + trace/log correlation) via dedicated bootstrap modules before adding domain-specific metrics.
 
 ## Anti-patterns
 1. Hidden side effects without tests or receipts.

@@ -13,19 +13,19 @@ In `template` mode, keep this file as scaffold-only.
 
 ## Snapshot
 
-Goal: Ship Phase 1 baseline with DB-backed API persistence/auth, worker compatibility, and CI quality gates.
-Now: `H2` operator cockpit baseline is live with Next.js `/admin/cockpit` candidate queue actions (`PATCH /candidates`, `POST /candidates/{id}/merge`, `POST /candidates/{id}/override`) and admin module/job flows (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) through server proxy routes, with both mock-backed and live backend-backed Playwright coverage across happy-path, negative/authz (`409` conflict surfaced, `401`, `403`, `422`), expanded persistence assertions (candidate events, module `updated_at` mutations, job enqueue/reap state transitions), hardened `web-e2e-live` CI runtime (uv/pnpm/Playwright caching, scoped retry, explicit timeout budgets), and admin proxy failure-mapping contracts for 4xx/5xx passthrough + stable error shaping.
-Next: Open PR using `docs/roadmap/L1_E2E_PR_SUMMARY_2026-02-11.md`, then start L1 full E2E scope expansion from that baseline.
+Goal: Ship Phase 1 baseline with DB-backed API/worker runtime, observability baseline, and deploy/migration safety gates.
+Now: `J1/J2/M1` baseline is in progress on `codex/j1-j2-m1-telemetry-safety`: API/workers OTel bootstrap is wired (FastAPI + asyncpg + httpx + worker lifecycle spans), log correlation fields (`trace_id`, `span_id`) are attached, Cloud Operations dashboard/alert artifacts are versioned under `docs/observability/`, and CI now includes explicit `migration-safety` and `deploy-readiness-gate` jobs.
+Next: Validate DB-backed integration + live E2E after instrumentation changes, then open PR for J1/J2/M1 baseline and follow with environment-specific deploy execution wiring.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
+- 2026-02-11 `[CODE]` Hardened J1 OTel bootstrap to avoid default local OTLP export failures when no collector endpoint is configured (instrumentation remains enabled; exporter activates only when endpoint env is set), and revalidated DB integration + live cockpit E2E post-change.
+- 2026-02-11 `[CODE]` Added J1 OTel baseline (`api/app/core/telemetry.py`, `workers/app/core/telemetry.py`) plus worker/client spans and API request logging correlation, added J2 dashboard/alert artifacts (`docs/observability/**`), and added M1 CI safety gates (`migration-safety`, `deploy-readiness-gate`, `scripts/migration-safety-gate.sh`).
 - 2026-02-10 `[CODE]` Added admin proxy failure-mapping contract tests (`web/tests/admin-proxy-failure-mapping.test.ts`) and extracted framework-agnostic proxy core (`web/lib/admin-api-core.ts`) to assert backend `422` limit-bounds passthrough, backend `503` passthrough, stable `{detail}` non-JSON error shaping, and config failure guard behavior.
 - 2026-02-10 `[CODE]` Added `RUNBOOK` API-first trust-policy operator snippets and Next.js trust-policy UI/proxy routes (`/admin/source-trust-policy`, `/api/admin/source-trust-policy`).
 - 2026-02-10 `[CODE]` Added admin operator cockpit baseline: new admin API module/job endpoints with provenance-backed safe mutations, Next.js `/admin/cockpit` candidate action workflows, and server proxy routes for candidates/modules/jobs operations.
 - 2026-02-10 `[CODE]` Added web-side API-contract tests (`node:test`) for cockpit query encoding and admin proxy route path builders; wired `pnpm --dir web test:contracts`.
 - 2026-02-10 `[CODE]` Added Playwright browser automation (`web/tests-e2e/admin-cockpit.spec.ts`) and config/scripts (`web/playwright.config.ts`, `pnpm --dir web test:e2e`) for mock-backed cockpit merge/patch/override + module/job operator flows.
-- 2026-02-10 `[CODE]` Added live backend Playwright cockpit coverage (`web/tests-e2e/admin-cockpit.live.spec.ts`, `web/playwright.live.config.ts`, `scripts/mock_supabase_auth.py`) and CI job wiring (`web-e2e-live` in `.github/workflows/ci.yml`).
-- 2026-02-10 `[CODE]` Expanded live backend Playwright cockpit coverage with negative/authz assertions: merge conflict error rendering plus backend `401` missing bearer, `403` non-admin, and `422` invalid payload contracts.
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
@@ -36,7 +36,9 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-08 `[CODE]` D-001 through D-004 active in `.agent/DECISIONS.md`.
 
 ## Receipts
-- 2026-02-10 `[TOOL]` `python -m compileall api/app workers/app` passed.
+- 2026-02-11 `[TOOL]` `make db-up -> make db-reset -> SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -> UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live -> make db-down` passed (`39/39` integration, `4/4` live E2E).
+- 2026-02-11 `[TOOL]` `(escalated) uv lock --project api` refreshed `api/uv.lock` for OTel deps.
+- 2026-02-11 `[TOOL]` `uv run --project api --extra dev ruff check api workers -> mypy api/app -> (workdir workers) uv run --project ../api --extra dev mypy app -> pytest api/tests --ignore=api/tests/test_discovery_jobs_integration.py -> uv run --project workers --extra dev pytest workers/tests -> bash scripts/agent-hygiene-check.sh --mode project` passed.
 - 2026-02-10 `[TOOL]` `uv run --project api --extra dev ruff check api/app/api/router.py api/app/api/routes/admin.py api/app/schemas/admin.py api/app/services/repository.py api/tests/test_discovery_jobs_integration.py` passed.
 - 2026-02-10 `[TOOL]` `uv run --project api --extra dev mypy api/app` passed.
 - 2026-02-10 `[TOOL]` `make db-up -> make db-reset -> (escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "admin_modules_list_and_toggle_enabled or admin_modules_requires_admin_scope or admin_jobs_visibility_and_safe_mutations or admin_jobs_requires_admin_scope" -> make db-down` passed (`4/4` selected).
@@ -54,5 +56,3 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-10 `[TOOL]` `(escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live` passed (`3/3`) after adding expanded live persistence assertions.
 - 2026-02-10 `[TOOL]` `fnm exec --using 24.13.0 pnpm --dir web typecheck -> pnpm --dir web exec playwright test -c playwright.live.config.ts --list -> bash scripts/agent-hygiene-check.sh --mode project` passed after CI/runtime hardening edits.
 - 2026-02-10 `[TOOL]` `(escalated) fnm exec --using 24.13.0 pnpm --dir web exec playwright install chromium -> (escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live` passed (`3/3`) after switching live config to cached Chromium + zero per-test retries.
-- 2026-02-10 `[TOOL]` `fnm exec --using 24.13.0 pnpm --dir web test:contracts -> typecheck -> bash scripts/agent-hygiene-check.sh --mode project` passed after admin proxy failure-mapping contract additions.
-- 2026-02-10 `[TOOL]` `(escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live` passed (`3/3`) after admin proxy-core refactor.

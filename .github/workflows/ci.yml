@@ -246,3 +246,50 @@ jobs:
             fi
             echo "Retrying web-e2e-live after transient failure..."
           done
+
+  migration-safety:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sloppy_jobulator_test
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sloppy_jobulator_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/sloppy_jobulator_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Postgres client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: until pg_isready -h 127.0.0.1 -p 5432 -U postgres -d sloppy_jobulator_test; do sleep 1; done
+
+      - name: Run migration safety gate
+        run: bash scripts/migration-safety-gate.sh
+
+  deploy-readiness-gate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs:
+      - api-fast
+      - api-integration-db
+      - workers
+      - web
+      - web-e2e-live
+      - migration-safety
+    steps:
+      - name: Deploy readiness summary
+        run: |
+          echo "All quality and migration safety gates passed on main."
+          echo "Safe to run environment-specific deploy workflows."

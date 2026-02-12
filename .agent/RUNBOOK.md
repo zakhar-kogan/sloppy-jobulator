@@ -239,6 +239,42 @@ limit 20;
 - Patch to terminal states (`rejected|archived|closed`) requires reason before submit.
 - Merge and override actions require reason before submit.
 
+## J1/J2 Telemetry and Alerts
+1. API telemetry defaults:
+- Enabled by default via `SJ_OTEL_ENABLED=true`.
+- FastAPI, asyncpg, and httpx spans are emitted through OTLP exporter configuration.
+2. Worker telemetry defaults:
+- Enabled by default via `SJ_WORKER_OTEL_ENABLED=true`.
+- Worker poll/job lifecycle spans plus httpx client spans are emitted through OTLP exporter configuration.
+3. Shared OTLP configuration:
+- Endpoint: `SJ_OTEL_EXPORTER_OTLP_ENDPOINT` / `SJ_WORKER_OTEL_EXPORTER_OTLP_ENDPOINT` or standard `OTEL_EXPORTER_OTLP_ENDPOINT`.
+- Headers: `SJ_OTEL_EXPORTER_OTLP_HEADERS` / `SJ_WORKER_OTEL_EXPORTER_OTLP_HEADERS`.
+- Sampling: `SJ_OTEL_TRACE_SAMPLE_RATIO` / `SJ_WORKER_OTEL_TRACE_SAMPLE_RATIO`.
+4. Log correlation:
+- API and worker logs attach `trace_id` and `span_id` fields when correlation is enabled.
+5. Cloud Operations assets:
+- Dashboard: `docs/observability/cloud-monitoring-dashboard.json`
+- Alert policies: `docs/observability/alert-policies.yaml`
+6. Import commands:
+```bash
+gcloud monitoring dashboards create \
+  --project "${GCP_PROJECT_ID}" \
+  --config-from-file docs/observability/cloud-monitoring-dashboard.json
+
+gcloud alpha monitoring policies create \
+  --project "${GCP_PROJECT_ID}" \
+  --policy-from-file docs/observability/alert-policies.yaml
+```
+
+## M1 Migration/Deploy Safety Gates
+1. Dedicated migration gate script:
+- Command: `DATABASE_URL=... bash scripts/migration-safety-gate.sh`
+- Checks: applies migration + seed and verifies required core tables (`discoveries`, `jobs`, `postings`) exist.
+2. CI gate job:
+- Workflow `CI` job `migration-safety` runs on PR and push for explicit migration safety validation.
+3. Deploy readiness gate:
+- Workflow `CI` job `deploy-readiness-gate` runs only on `push` to `main` and requires all quality + migration jobs to pass before signaling deploy readiness.
+
 ## Incident basics
 1. Health check endpoint/command: `GET /healthz` on API.
 2. Log query path: `UNCONFIRMED` (Cloud Logging filters pending infra setup).

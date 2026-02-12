@@ -1,0 +1,64 @@
+---
+displayName: "SJ - Ingest Failures High"
+combiner: OR
+conditions:
+  - displayName: "Ingest failure rate > 5/min"
+    conditionThreshold:
+      filter: 'metric.type="custom.googleapis.com/sloppy_jobulator/ingest/failures" resource.type="global"'
+      aggregations:
+        - alignmentPeriod: 60s
+          perSeriesAligner: ALIGN_RATE
+      comparison: COMPARISON_GT
+      thresholdValue: 5
+      duration: 300s
+notificationChannels: []
+alertStrategy:
+  autoClose: 3600s
+---
+displayName: "SJ - Queue Backlog Growth"
+combiner: OR
+conditions:
+  - displayName: "Queue backlog > 1000"
+    conditionThreshold:
+      filter: 'metric.type="custom.googleapis.com/sloppy_jobulator/jobs/backlog" resource.type="global"'
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_MEAN
+      comparison: COMPARISON_GT
+      thresholdValue: 1000
+      duration: 900s
+notificationChannels: []
+alertStrategy:
+  autoClose: 3600s
+---
+displayName: "SJ - Lease Expiration Growth"
+combiner: OR
+conditions:
+  - displayName: "Lease expirations > 20/5m"
+    conditionThreshold:
+      filter: 'metric.type="custom.googleapis.com/sloppy_jobulator/jobs/lease_expired" resource.type="global"'
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_RATE
+      comparison: COMPARISON_GT
+      thresholdValue: 20
+      duration: 600s
+notificationChannels: []
+alertStrategy:
+  autoClose: 3600s
+---
+displayName: "SJ - Freshness SLA Miss"
+combiner: OR
+conditions:
+  - displayName: "Stale active postings > 25"
+    conditionThreshold:
+      filter: 'metric.type="custom.googleapis.com/sloppy_jobulator/freshness/stale_active_count" resource.type="global"'
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_MEAN
+      comparison: COMPARISON_GT
+      thresholdValue: 25
+      duration: 900s
+notificationChannels: []
+alertStrategy:
+  autoClose: 3600s

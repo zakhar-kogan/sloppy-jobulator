@@ -77,9 +77,13 @@ Configure branch protection to require these CI jobs:
 - `api-integration-db`
 - `workers`
 - `web`
+- `web-e2e-live`
+- `migration-safety`
 - `validate-agent-contract` (from `Agent Hygiene` workflow)
 
 This keeps fast checks and DB-backed integration checks as separate required gates.
+
+On `push` to `main`, CI also runs `deploy-readiness-gate` after all quality + migration gates pass.
 
 ## Human Role Bootstrap (A3)
 
@@ -114,3 +118,15 @@ Override with `DB_URL=...` when needed.
 - First migration is `db/migrations/0001_schema_v1.sql`.
 - Dev machine credentials are seeded in `db/seeds/001_taxonomy.sql`.
 - Node workflows use `fnm` + `pnpm` (`fnm use 24.13.0`).
+
+## OTel Runtime Config (J1)
+
+API (`SJ_` prefix) and workers (`SJ_WORKER_` prefix) support:
+- `OTEL_ENABLED` (default `true`)
+- `OTEL_SERVICE_NAME`
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (or standard `OTEL_EXPORTER_OTLP_ENDPOINT` env)
+- `OTEL_EXPORTER_OTLP_HEADERS` (`key=value,key2=value2`)
+- `OTEL_TRACE_SAMPLE_RATIO` (default `1.0`)
+- `OTEL_LOG_CORRELATION` (default `true`)
+
+J2 dashboard and alert artifacts live under `docs/observability/`.
