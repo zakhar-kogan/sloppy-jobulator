@@ -11,15 +11,15 @@ on:
           - staging
           - prod
       run_observability_import:
-        description: "Bind and import dashboard/alerts after deploy"
-        required: true
+        description: "Optional: import dashboard/alerts after deploy"
+        required: false
         type: boolean
-        default: true
+        default: false
       run_telemetry_validation:
-        description: "Run telemetry quality validation after deploy"
-        required: true
+        description: "Optional: run telemetry validation after deploy"
+        required: false
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: read
@@ -32,11 +32,6 @@ jobs:
     environment: staging
     env:
       GCP_PROJECT_ID: ${{ secrets.SJ_GCP_PROJECT_ID_STAGING }}
-      SJ_OBS_ENVIRONMENT: staging
-      SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_STAGING }}
-      SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_STAGING }}
-      SJ_OBS_NOTIFICATION_CHANNELS: ${{ secrets.SJ_NOTIFICATION_CHANNELS_STAGING }}
-      SJ_API_BASE_URL: ${{ secrets.SJ_API_BASE_URL_STAGING }}
       SJ_DEPLOY_API_CMD: ${{ secrets.SJ_DEPLOY_API_CMD_STAGING }}
       SJ_DEPLOY_WORKER_CMD: ${{ secrets.SJ_DEPLOY_WORKER_CMD_STAGING }}
       SJ_DEPLOY_WEB_CMD: ${{ secrets.SJ_DEPLOY_WEB_CMD_STAGING }}
@@ -48,10 +43,6 @@ jobs:
         run: |
           required=(
             GCP_PROJECT_ID
-            SJ_OBS_API_CLOUD_RUN_SERVICE
-            SJ_OBS_WORKER_OTEL_SERVICE
-            SJ_OBS_NOTIFICATION_CHANNELS
-            SJ_API_BASE_URL
             SJ_DEPLOY_API_CMD
             SJ_DEPLOY_WORKER_CMD
             SJ_DEPLOY_WEB_CMD
@@ -85,10 +76,20 @@ jobs:
 
       - name: Import observability assets
         if: github.event.inputs.run_observability_import == 'true'
+        env:
+          SJ_OBS_ENVIRONMENT: staging
+          SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_STAGING }}
+          SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_STAGING }}
+          SJ_OBS_NOTIFICATION_CHANNELS: ${{ secrets.SJ_NOTIFICATION_CHANNELS_STAGING }}
         run: bash scripts/import-observability-assets.sh
 
       - name: Validate telemetry quality
         if: github.event.inputs.run_telemetry_validation == 'true'
+        env:
+          SJ_OBS_ENVIRONMENT: staging
+          SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_STAGING }}
+          SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_STAGING }}
+          SJ_API_BASE_URL: ${{ secrets.SJ_API_BASE_URL_STAGING }}
         run: bash scripts/validate-telemetry-quality.sh
 
   deploy-prod:
@@ -97,11 +98,6 @@ jobs:
     environment: production
     env:
       GCP_PROJECT_ID: ${{ secrets.SJ_GCP_PROJECT_ID_PROD }}
-      SJ_OBS_ENVIRONMENT: prod
-      SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_PROD }}
-      SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_PROD }}
-      SJ_OBS_NOTIFICATION_CHANNELS: ${{ secrets.SJ_NOTIFICATION_CHANNELS_PROD }}
-      SJ_API_BASE_URL: ${{ secrets.SJ_API_BASE_URL_PROD }}
       SJ_DEPLOY_API_CMD: ${{ secrets.SJ_DEPLOY_API_CMD_PROD }}
       SJ_DEPLOY_WORKER_CMD: ${{ secrets.SJ_DEPLOY_WORKER_CMD_PROD }}
       SJ_DEPLOY_WEB_CMD: ${{ secrets.SJ_DEPLOY_WEB_CMD_PROD }}
@@ -113,10 +109,6 @@ jobs:
         run: |
           required=(
             GCP_PROJECT_ID
-            SJ_OBS_API_CLOUD_RUN_SERVICE
-            SJ_OBS_WORKER_OTEL_SERVICE
-            SJ_OBS_NOTIFICATION_CHANNELS
-            SJ_API_BASE_URL
             SJ_DEPLOY_API_CMD
             SJ_DEPLOY_WORKER_CMD
             SJ_DEPLOY_WEB_CMD
@@ -150,8 +142,18 @@ jobs:
 
       - name: Import observability assets
         if: github.event.inputs.run_observability_import == 'true'
+        env:
+          SJ_OBS_ENVIRONMENT: prod
+          SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_PROD }}
+          SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_PROD }}
+          SJ_OBS_NOTIFICATION_CHANNELS: ${{ secrets.SJ_NOTIFICATION_CHANNELS_PROD }}
         run: bash scripts/import-observability-assets.sh
 
       - name: Validate telemetry quality
         if: github.event.inputs.run_telemetry_validation == 'true'
+        env:
+          SJ_OBS_ENVIRONMENT: prod
+          SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_PROD }}
+          SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_PROD }}
+          SJ_API_BASE_URL: ${{ secrets.SJ_API_BASE_URL_PROD }}
         run: bash scripts/validate-telemetry-quality.sh
