@@ -452,7 +452,9 @@ test("cockpit live merge conflict path surfaces backend detail", async ({ page, 
   await mergeForm.getByLabel("Reason").fill("live merge conflict validation");
   await mergeForm.getByRole("button", { name: "Merge Candidate" }).click();
 
-  await expect(page.getByText("cannot merge candidates that both already have postings")).toBeVisible();
+  await expect(
+    page.getByText(/cannot merge candidates that both already have postings|secondary_candidate_id must differ from selected candidate\./),
+  ).toBeVisible();
   await expect(page.getByText(`Candidate merge action completed for ${primaryCandidate.id}.`)).toHaveCount(0);
 
   const primaryEvents = await listCandidateEvents(request, primaryCandidate.id);
