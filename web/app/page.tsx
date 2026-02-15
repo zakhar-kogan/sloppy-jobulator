@@ -28,6 +28,11 @@ export default function HomePage() {
           </Link>
         </p>
         <p>
+          <Link className="inline-link" href="/admin/url-normalization-overrides">
+            Open URL normalization overrides admin
+          </Link>
+        </p>
+        <p>
           <Link className="inline-link" href="/admin/cockpit">
             Open moderator cockpit
           </Link>

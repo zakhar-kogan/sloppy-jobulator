@@ -32,6 +32,29 @@ class SourceTrustPolicyEnabledPatchRequest(BaseModel):
     enabled: bool
 
 
+class URLNormalizationOverrideOut(BaseModel):
+    domain: str
+    strip_query_params: list[str] = Field(default_factory=list)
+    strip_query_prefixes: list[str] = Field(default_factory=list)
+    strip_www: bool
+    force_https: bool
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class URLNormalizationOverrideUpsertRequest(BaseModel):
+    strip_query_params: list[str] = Field(default_factory=list)
+    strip_query_prefixes: list[str] = Field(default_factory=list)
+    strip_www: bool = False
+    force_https: bool = False
+    enabled: bool = True
+
+
+class URLNormalizationOverrideEnabledPatchRequest(BaseModel):
+    enabled: bool
+
+
 class ModuleOut(BaseModel):
     id: str
     module_id: str

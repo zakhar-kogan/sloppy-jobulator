@@ -77,6 +77,10 @@ async function createDiscovery(
   externalId: string,
   canonicalSlug: string,
   title: string,
+  options?: {
+    url?: string;
+    metadata?: Record<string, unknown>;
+  },
 ): Promise<DiscoveryAccepted> {
   const discoveredAt = new Date().toISOString();
   const discoveryResp = await request.post(`${API_BASE_URL}/discoveries`, {
@@ -85,10 +89,10 @@ async function createDiscovery(
       origin_module_id: "local-connector",
       external_id: externalId,
       discovered_at: discoveredAt,
-      url: `https://example.edu/jobs/${canonicalSlug}`,
+      url: options?.url ?? `https://example.edu/jobs/${canonicalSlug}`,
       title_hint: title,
       text_hint: "Live E2E cockpit seed payload",
-      metadata: { source: "playwright-live-e2e" },
+      metadata: options?.metadata ?? { source: "playwright-live-e2e" },
     },
   });
   expect(discoveryResp.ok()).toBeTruthy();
@@ -655,6 +659,53 @@ test("cockpit live retargets selected candidate after filter-page changes before
     .toBeTruthy();
 
   expect(first.discoveryId).not.toEqual(second.discoveryId);
+});
+
+test("admin override mutation changes discovery normalization for seeded URL", async ({ page, request }) => {
+  const suffix = uniqueSuffix();
+  const domain = `live-override-${suffix}.example.edu`;
+
+  await page.goto("/admin/url-normalization-overrides");
+  await expect(page.getByRole("heading", { name: "URL Normalization Overrides" })).toBeVisible();
+
+  const upsertForm = page.locator("article:has(h2:text-is('Upsert Override'))");
+  await upsertForm.getByLabel("Domain").fill(domain);
+  await upsertForm.getByLabel("strip_query_params (comma-separated)").fill("sessionid");
+  await upsertForm.getByLabel("strip_query_prefixes (comma-separated)").fill("");
+  await upsertForm.getByLabel("strip_www").check();
+  await upsertForm.getByLabel("force_https").check();
+  await upsertForm.getByRole("button", { name: "Save Override" }).click();
+  await expect(page.getByText(`Saved override for ${domain}.`)).toBeVisible();
+
+  const seededOn = await createDiscovery(
+    request,
+    `live-override-on-${suffix}`,
+    `live-override-on-${suffix}`,
+    `Live Override On ${suffix}`,
+    {
+      url: `http://www.${domain}/jobs/live-override-on-${suffix}?sessionId=abc&utm_source=feed`,
+      metadata: { source: "playwright-live-e2e", resolve_redirects: true },
+    },
+  );
+  expect(seededOn.normalized_url).toBe(`https://${domain}/jobs/live-override-on-${suffix}`);
+
+  const overrideTable = page.locator("article:has(h2:text-is('Overrides'))");
+  const row = overrideTable.locator("tbody tr").filter({ hasText: domain });
+  await expect(row).toHaveCount(1);
+  await row.getByRole("button", { name: "Disable" }).click();
+  await expect(page.getByText(`Updated enabled=false for ${domain}.`)).toBeVisible();
+
+  const seededOff = await createDiscovery(
+    request,
+    `live-override-off-${suffix}`,
+    `live-override-off-${suffix}`,
+    `Live Override Off ${suffix}`,
+    {
+      url: `http://www.${domain}/jobs/live-override-off-${suffix}?sessionId=abc&utm_source=feed`,
+      metadata: { source: "playwright-live-e2e", resolve_redirects: true },
+    },
+  );
+  expect(seededOff.normalized_url).toBe(`http://www.${domain}/jobs/live-override-off-${suffix}?sessionId=abc`);
 });
 
 test("cockpit live backend rejects non-admin and invalid requests", async ({ request }) => {

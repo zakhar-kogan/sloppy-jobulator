@@ -81,6 +81,8 @@ SOURCE_POLICY_ROUTE_LABEL_RE = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
 MODULE_KINDS = {"connector", "processor"}
 JOB_KINDS = {"dedupe", "extract", "enrich", "check_freshness", "resolve_url_redirects"}
 JOB_STATUSES = {"queued", "claimed", "done", "failed", "dead_letter"}
+URL_OVERRIDE_TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+URL_OVERRIDE_DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
 class PostgresRepository:
@@ -298,7 +300,6 @@ class PostgresRepository:
         metadata: dict[str, Any],
         actor_module_db_id: str,
         enqueue_redirect_resolution: bool = False,
-        normalization_overrides_json: str | None = None,
     ) -> str:
         pool = await self._get_pool()
 
@@ -432,15 +433,15 @@ class PostgresRepository:
                         json.dumps({"discovery_id": discovery_id}),
                     )
                     if enqueue_redirect_resolution and url:
+                        normalization_overrides_json = await self._fetch_enabled_url_normalization_overrides_json(conn=conn)
                         redirect_inputs: dict[str, Any] = {
                             "discovery_id": discovery_id,
                             "url": url,
                             "normalized_url": normalized_url,
                             "canonical_hash": canonical_hash,
                         }
-                        raw_overrides = self._coerce_text(normalization_overrides_json)
-                        if raw_overrides:
-                            redirect_inputs["normalization_overrides_json"] = raw_overrides
+                        if normalization_overrides_json:
+                            redirect_inputs["normalization_overrides_json"] = normalization_overrides_json
                         await conn.execute(
                             """
                             insert into jobs (kind, target_type, target_id, inputs_json)
@@ -602,7 +603,25 @@ class PostgresRepository:
                         module_db_id,
                         json.dumps({"lease_seconds": lease_seconds}),
                     )
-                    return self._job_row_to_dict(row)
+                    job = self._job_row_to_dict(row)
+                    if job["kind"] == "resolve_url_redirects" and job["target_type"] == "discovery":
+                        overrides_json = await self._fetch_enabled_url_normalization_overrides_json(conn=conn)
+                        inputs = self._coerce_json_dict(job.get("inputs_json"))
+                        if overrides_json:
+                            inputs["normalization_overrides_json"] = overrides_json
+                        else:
+                            inputs.pop("normalization_overrides_json", None)
+                        await conn.execute(
+                            """
+                            update jobs
+                            set inputs_json = $2::jsonb
+                            where id = $1::uuid
+                            """,
+                            row["id"],
+                            json.dumps(inputs),
+                        )
+                        job["inputs_json"] = inputs
+                    return job
         except (pg_exc.InvalidTextRepresentationError, asyncpg.DataError) as exc:
             raise RepositoryNotFoundError("job not found") from exc
 
@@ -2253,6 +2272,334 @@ class PostgresRepository:
                     )
                 return self._source_trust_policy_row_to_dict(row)
 
+    async def _record_url_normalization_override_event(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        override_id: str,
+        event_type: str,
+        actor_user_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        await conn.execute(
+            """
+            insert into provenance_events (
+              entity_type,
+              entity_id,
+              event_type,
+              actor_type,
+              actor_id,
+              payload
+            )
+            values ('url_normalization_override', $1::uuid, $2, 'human', $3::uuid, $4::jsonb)
+            """,
+            override_id,
+            event_type,
+            actor_user_id,
+            json.dumps(payload),
+        )
+
+    async def list_url_normalization_overrides(
+        self,
+        *,
+        domain: str | None,
+        enabled: bool | None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        pool = await self._get_pool()
+        normalized_domain = self._normalize_url_override_domain(domain, field_path="domain", allow_none=True)
+        rows = await pool.fetch(
+            """
+            select
+              id::text as id,
+              domain,
+              strip_query_params,
+              strip_query_prefixes,
+              strip_www,
+              force_https,
+              enabled,
+              created_at,
+              updated_at
+            from url_normalization_overrides
+            where ($1::text is null or domain = $1)
+              and ($2::boolean is null or enabled = $2)
+            order by domain asc
+            limit $3
+            offset $4
+            """,
+            normalized_domain,
+            enabled,
+            limit,
+            offset,
+        )
+        return [self._url_normalization_override_row_to_dict(row) for row in rows]
+
+    async def get_url_normalization_override(self, *, domain: str) -> dict[str, Any]:
+        pool = await self._get_pool()
+        normalized_domain = self._normalize_url_override_domain(domain, field_path="domain")
+        row = await pool.fetchrow(
+            """
+            select
+              id::text as id,
+              domain,
+              strip_query_params,
+              strip_query_prefixes,
+              strip_www,
+              force_https,
+              enabled,
+              created_at,
+              updated_at
+            from url_normalization_overrides
+            where domain = $1
+            """,
+            normalized_domain,
+        )
+        if not row:
+            raise RepositoryNotFoundError("url normalization override not found")
+        return self._url_normalization_override_row_to_dict(row)
+
+    async def upsert_url_normalization_override(
+        self,
+        *,
+        domain: str,
+        strip_query_params: Any,
+        strip_query_prefixes: Any,
+        strip_www: bool,
+        force_https: bool,
+        enabled: bool = True,
+        actor_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        pool = await self._get_pool()
+
+        normalized_domain = self._normalize_url_override_domain(domain, field_path="domain")
+        normalized_strip_query_params = self._normalize_url_override_tokens(
+            strip_query_params,
+            field_path="strip_query_params",
+            strict=True,
+        )
+        normalized_strip_query_prefixes = self._normalize_url_override_tokens(
+            strip_query_prefixes,
+            field_path="strip_query_prefixes",
+            strict=True,
+        )
+        normalized_actor_user_id = self._coerce_text(actor_user_id)
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                existing_row = await conn.fetchrow(
+                    """
+                    select
+                      id::text as id,
+                      domain,
+                      strip_query_params,
+                      strip_query_prefixes,
+                      strip_www,
+                      force_https,
+                      enabled
+                    from url_normalization_overrides
+                    where domain = $1
+                    for update
+                    """,
+                    normalized_domain,
+                )
+                if existing_row:
+                    row = await conn.fetchrow(
+                        """
+                        update url_normalization_overrides
+                        set
+                          strip_query_params = $2::text[],
+                          strip_query_prefixes = $3::text[],
+                          strip_www = $4,
+                          force_https = $5,
+                          enabled = $6
+                        where domain = $1
+                        returning
+                          id::text as id,
+                          domain,
+                          strip_query_params,
+                          strip_query_prefixes,
+                          strip_www,
+                          force_https,
+                          enabled,
+                          created_at,
+                          updated_at
+                        """,
+                        normalized_domain,
+                        normalized_strip_query_params,
+                        normalized_strip_query_prefixes,
+                        bool(strip_www),
+                        bool(force_https),
+                        bool(enabled),
+                    )
+                    operation = "updated"
+                else:
+                    row = await conn.fetchrow(
+                        """
+                        insert into url_normalization_overrides (
+                          domain,
+                          strip_query_params,
+                          strip_query_prefixes,
+                          strip_www,
+                          force_https,
+                          enabled
+                        )
+                        values ($1, $2::text[], $3::text[], $4, $5, $6)
+                        returning
+                          id::text as id,
+                          domain,
+                          strip_query_params,
+                          strip_query_prefixes,
+                          strip_www,
+                          force_https,
+                          enabled,
+                          created_at,
+                          updated_at
+                        """,
+                        normalized_domain,
+                        normalized_strip_query_params,
+                        normalized_strip_query_prefixes,
+                        bool(strip_www),
+                        bool(force_https),
+                        bool(enabled),
+                    )
+                    operation = "created"
+                if not row:
+                    raise RepositoryConflictError("failed to upsert url normalization override")
+
+                if normalized_actor_user_id:
+                    previous_payload: dict[str, Any] | None = None
+                    if existing_row:
+                        previous_payload = {
+                            "domain": existing_row["domain"],
+                            "strip_query_params": self._normalize_url_override_tokens(
+                                existing_row["strip_query_params"],
+                                field_path="strip_query_params",
+                                strict=False,
+                            ),
+                            "strip_query_prefixes": self._normalize_url_override_tokens(
+                                existing_row["strip_query_prefixes"],
+                                field_path="strip_query_prefixes",
+                                strict=False,
+                            ),
+                            "strip_www": bool(existing_row["strip_www"]),
+                            "force_https": bool(existing_row["force_https"]),
+                            "enabled": bool(existing_row["enabled"]),
+                        }
+                    await self._record_url_normalization_override_event(
+                        conn=conn,
+                        override_id=row["id"],
+                        event_type="override_upserted",
+                        actor_user_id=normalized_actor_user_id,
+                        payload={
+                            "domain": row["domain"],
+                            "operation": operation,
+                            "strip_query_params": self._normalize_url_override_tokens(
+                                row["strip_query_params"],
+                                field_path="strip_query_params",
+                                strict=False,
+                            ),
+                            "strip_query_prefixes": self._normalize_url_override_tokens(
+                                row["strip_query_prefixes"],
+                                field_path="strip_query_prefixes",
+                                strict=False,
+                            ),
+                            "strip_www": bool(row["strip_www"]),
+                            "force_https": bool(row["force_https"]),
+                            "enabled": bool(row["enabled"]),
+                            "previous": previous_payload,
+                        },
+                    )
+
+                return self._url_normalization_override_row_to_dict(row)
+
+    async def set_url_normalization_override_enabled(
+        self,
+        *,
+        domain: str,
+        enabled: bool,
+        actor_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        pool = await self._get_pool()
+        normalized_domain = self._normalize_url_override_domain(domain, field_path="domain")
+        normalized_actor_user_id = self._coerce_text(actor_user_id)
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                previous_row = await conn.fetchrow(
+                    """
+                    select
+                      id::text as id,
+                      domain,
+                      enabled
+                    from url_normalization_overrides
+                    where domain = $1
+                    for update
+                    """,
+                    normalized_domain,
+                )
+                if not previous_row:
+                    raise RepositoryNotFoundError("url normalization override not found")
+
+                row = await conn.fetchrow(
+                    """
+                    update url_normalization_overrides
+                    set enabled = $2
+                    where domain = $1
+                    returning
+                      id::text as id,
+                      domain,
+                      strip_query_params,
+                      strip_query_prefixes,
+                      strip_www,
+                      force_https,
+                      enabled,
+                      created_at,
+                      updated_at
+                    """,
+                    normalized_domain,
+                    bool(enabled),
+                )
+                if not row:
+                    raise RepositoryNotFoundError("url normalization override not found")
+
+                if normalized_actor_user_id:
+                    await self._record_url_normalization_override_event(
+                        conn=conn,
+                        override_id=row["id"],
+                        event_type="override_enabled_changed",
+                        actor_user_id=normalized_actor_user_id,
+                        payload={
+                            "domain": row["domain"],
+                            "previous_enabled": bool(previous_row["enabled"]),
+                            "enabled": bool(row["enabled"]),
+                        },
+                    )
+
+                return self._url_normalization_override_row_to_dict(row)
+
+    async def list_enabled_url_normalization_overrides(self) -> dict[str, dict[str, Any]]:
+        pool = await self._get_pool()
+        rows = await pool.fetch(
+            """
+            select
+              domain,
+              strip_query_params,
+              strip_query_prefixes,
+              strip_www,
+              force_https
+            from url_normalization_overrides
+            where enabled = true
+            order by domain asc
+            """,
+        )
+        return self._build_url_normalization_override_rules(rows)
+
+    async def get_enabled_url_normalization_overrides_json(self) -> str | None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            return await self._fetch_enabled_url_normalization_overrides_json(conn=conn)
+
     async def list_modules(
         self,
         *,
@@ -2520,6 +2867,26 @@ class PostgresRepository:
             "auto_publish": bool(row["auto_publish"]),
             "requires_moderation": bool(row["requires_moderation"]),
             "rules_json": self._validate_source_trust_policy_rules_json(row["rules_json"], strict=False),
+            "enabled": bool(row["enabled"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def _url_normalization_override_row_to_dict(self, row: asyncpg.Record) -> dict[str, Any]:
+        return {
+            "domain": row["domain"],
+            "strip_query_params": self._normalize_url_override_tokens(
+                row["strip_query_params"],
+                field_path="strip_query_params",
+                strict=False,
+            ),
+            "strip_query_prefixes": self._normalize_url_override_tokens(
+                row["strip_query_prefixes"],
+                field_path="strip_query_prefixes",
+                strict=False,
+            ),
+            "strip_www": bool(row["strip_www"]),
+            "force_https": bool(row["force_https"]),
             "enabled": bool(row["enabled"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
@@ -3313,6 +3680,104 @@ class PostgresRepository:
         if isinstance(value, dict):
             return value
         return {}
+
+    def _normalize_url_override_domain(
+        self,
+        domain: Any,
+        *,
+        field_path: str,
+        allow_none: bool = False,
+    ) -> str | None:
+        normalized = self._coerce_text(domain)
+        if normalized is None:
+            if allow_none:
+                return None
+            raise RepositoryValidationError(f"{field_path} must be a non-empty string")
+
+        candidate = normalized.lower().lstrip(".")
+        if not URL_OVERRIDE_DOMAIN_RE.match(candidate):
+            raise RepositoryValidationError(f"{field_path} must be a valid lowercase domain")
+        return candidate
+
+    def _normalize_url_override_tokens(
+        self,
+        value: Any,
+        *,
+        field_path: str,
+        strict: bool,
+    ) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            if strict:
+                raise RepositoryValidationError(f"{field_path} must be a list of lowercase strings")
+            return []
+
+        normalized: list[str] = []
+        for index, item in enumerate(value):
+            if not isinstance(item, str):
+                if strict:
+                    raise RepositoryValidationError(f"{field_path}[{index}] must be a lowercase string")
+                continue
+            token = item.strip().lower()
+            if not token:
+                if strict:
+                    raise RepositoryValidationError(f"{field_path}[{index}] must be a lowercase string")
+                continue
+            if not URL_OVERRIDE_TOKEN_RE.match(token):
+                if strict:
+                    raise RepositoryValidationError(
+                        f"{field_path}[{index}] must contain only lowercase letters, digits, ., _ or -",
+                    )
+                continue
+            if token not in normalized:
+                normalized.append(token)
+        normalized.sort()
+        return normalized
+
+    def _build_url_normalization_override_rules(
+        self,
+        rows: list[asyncpg.Record],
+    ) -> dict[str, dict[str, Any]]:
+        rules: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            domain = self._normalize_url_override_domain(row["domain"], field_path="domain", allow_none=True)
+            if not domain:
+                continue
+            rules[domain] = {
+                "strip_query_params": self._normalize_url_override_tokens(
+                    row["strip_query_params"],
+                    field_path="strip_query_params",
+                    strict=False,
+                ),
+                "strip_query_prefixes": self._normalize_url_override_tokens(
+                    row["strip_query_prefixes"],
+                    field_path="strip_query_prefixes",
+                    strict=False,
+                ),
+                "strip_www": bool(row["strip_www"]),
+                "force_https": bool(row["force_https"]),
+            }
+        return rules
+
+    async def _fetch_enabled_url_normalization_overrides_json(self, *, conn: asyncpg.Connection) -> str | None:
+        rows = await conn.fetch(
+            """
+            select
+              domain,
+              strip_query_params,
+              strip_query_prefixes,
+              strip_www,
+              force_https
+            from url_normalization_overrides
+            where enabled = true
+            order by domain asc
+            """,
+        )
+        rules = self._build_url_normalization_override_rules(rows)
+        if not rules:
+            return None
+        return json.dumps(rules, separators=(",", ":"), sort_keys=True)
 
     def _validate_source_trust_policy_rules_json(self, rules_json: Any, *, strict: bool) -> dict[str, Any]:
         raw_rules = self._coerce_json_dict(rules_json)

@@ -231,6 +231,21 @@ create table source_trust_policy (
   updated_at timestamptz not null default now()
 );
 
+create table url_normalization_overrides (
+  id uuid primary key default gen_random_uuid(),
+  domain text not null unique,
+  strip_query_params text[] not null default '{}',
+  strip_query_prefixes text[] not null default '{}',
+  strip_www boolean not null default false,
+  force_https boolean not null default false,
+  enabled boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index url_normalization_overrides_enabled_domain_idx
+  on url_normalization_overrides(enabled, domain);
+
 create or replace function set_updated_at()
 returns trigger
 language plpgsql
@@ -267,4 +282,8 @@ for each row execute procedure set_updated_at();
 
 create trigger source_trust_policy_updated_at
 before update on source_trust_policy
+for each row execute procedure set_updated_at();
+
+create trigger url_normalization_overrides_updated_at
+before update on url_normalization_overrides
 for each row execute procedure set_updated_at();

@@ -67,13 +67,9 @@ def _set_redirect_resolution_mode(
     monkeypatch: pytest.MonkeyPatch,
     *,
     enabled: bool,
-    overrides_json: str | None = None,
 ) -> None:
     monkeypatch.setenv("SJ_ENABLE_REDIRECT_RESOLUTION_JOBS", "true" if enabled else "false")
-    if overrides_json is None:
-        monkeypatch.delenv("SJ_URL_NORMALIZATION_OVERRIDES_JSON", raising=False)
-    else:
-        monkeypatch.setenv("SJ_URL_NORMALIZATION_OVERRIDES_JSON", overrides_json)
+    monkeypatch.delenv("SJ_URL_NORMALIZATION_OVERRIDES_JSON", raising=False)
     get_settings.cache_clear()
     get_repository.cache_clear()
 
@@ -387,12 +383,23 @@ def test_discovery_redirect_resolution_uses_setting_defaults_and_metadata_overri
     assert matching_jobs[0]["kind"] == "extract"
 
 
-def test_discovery_redirect_resolution_job_receives_normalization_overrides_from_settings(
+def test_discovery_redirect_resolution_job_receives_normalization_overrides_from_persisted_overrides(
     api_client: TestClient,
+    database_url: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    overrides_json = '{"example.edu":{"strip_query_params":["sessionid"],"force_https":true}}'
-    _set_redirect_resolution_mode(monkeypatch, enabled=True, overrides_json=overrides_json)
+    _set_redirect_resolution_mode(monkeypatch, enabled=True)
+    _run(
+        _upsert_url_normalization_override(
+            database_url,
+            domain="example.edu",
+            strip_query_params=["sessionid"],
+            strip_query_prefixes=[],
+            strip_www=False,
+            force_https=True,
+            enabled=True,
+        )
+    )
 
     discovery_response = api_client.post(
         "/discoveries",
@@ -416,7 +423,144 @@ def test_discovery_redirect_resolution_job_receives_normalization_overrides_from
     resolve_job = _find_job(jobs, kind="resolve_url_redirects", target_id=discovery_id)
     inputs = resolve_job.get("inputs_json")
     assert isinstance(inputs, dict)
-    assert inputs.get("normalization_overrides_json") == overrides_json
+    assert (
+        inputs.get("normalization_overrides_json")
+        == '{"example.edu":{"force_https":true,"strip_query_params":["sessionid"],"strip_query_prefixes":[],"strip_www":false}}'
+    )
+
+
+def test_discovery_url_normalization_override_precedence_and_rollback(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    _run(
+        _upsert_url_normalization_override(
+            database_url,
+            domain="example.edu",
+            strip_query_params=["sessionid"],
+            strip_query_prefixes=[],
+            strip_www=True,
+            force_https=True,
+            enabled=True,
+        )
+    )
+    _run(
+        _upsert_url_normalization_override(
+            database_url,
+            domain="jobs.example.edu",
+            strip_query_params=["token"],
+            strip_query_prefixes=[],
+            strip_www=False,
+            force_https=False,
+            enabled=True,
+        )
+    )
+
+    specific_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-override-precedence-specific",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "http://jobs.example.edu/path?sessionId=abc&token=def&utm_source=feed",
+            "title_hint": "Override precedence specific",
+            "text_hint": "Override precedence specific",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert specific_response.status_code == 202
+    assert specific_response.json()["normalized_url"] == "http://jobs.example.edu/path?sessionId=abc"
+
+    _run(
+        _upsert_url_normalization_override(
+            database_url,
+            domain="jobs.example.edu",
+            strip_query_params=["token"],
+            strip_query_prefixes=[],
+            strip_www=False,
+            force_https=False,
+            enabled=False,
+        )
+    )
+    rollback_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-override-precedence-rollback",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "http://www.jobs.example.edu/path?sessionId=abc&token=def&utm_source=feed",
+            "title_hint": "Override rollback",
+            "text_hint": "Override rollback",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert rollback_response.status_code == 202
+    assert rollback_response.json()["normalized_url"] == "https://jobs.example.edu/path?token=def"
+
+
+def test_redirect_claim_rehydrates_overrides_after_rollback(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_redirect_resolution_mode(monkeypatch, enabled=True)
+    _run(
+        _upsert_url_normalization_override(
+            database_url,
+            domain="example.edu",
+            strip_query_params=["sessionid"],
+            strip_query_prefixes=[],
+            strip_www=False,
+            force_https=True,
+            enabled=True,
+        )
+    )
+
+    discovery_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-override-rollback-claim",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "http://example.edu/jobs/redirect-overrides?sessionId=abc&utm_source=feed",
+            "title_hint": "Redirect override rollback",
+            "text_hint": "Redirect override rollback",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert discovery_response.status_code == 202
+    discovery_id = discovery_response.json()["discovery_id"]
+
+    jobs_response = api_client.get("/jobs", headers=PROCESSOR_HEADERS)
+    assert jobs_response.status_code == 200
+    resolve_job = _find_job(jobs_response.json(), kind="resolve_url_redirects", target_id=discovery_id)
+    assert isinstance(resolve_job.get("inputs_json"), dict)
+    assert "normalization_overrides_json" in resolve_job["inputs_json"]
+
+    _run(
+        _upsert_url_normalization_override(
+            database_url,
+            domain="example.edu",
+            strip_query_params=["sessionid"],
+            strip_query_prefixes=[],
+            strip_www=False,
+            force_https=True,
+            enabled=False,
+        )
+    )
+
+    claim_response = api_client.post(
+        f"/jobs/{resolve_job['id']}/claim",
+        json={"lease_seconds": 120},
+        headers=PROCESSOR_HEADERS,
+    )
+    assert claim_response.status_code == 200
+    claimed_inputs = claim_response.json().get("inputs_json")
+    assert isinstance(claimed_inputs, dict)
+    assert claimed_inputs.get("normalization_overrides_json") is None
 
 
 def test_expired_claimed_jobs_are_requeued(api_client: TestClient, database_url: str) -> None:
@@ -1667,6 +1811,169 @@ def test_admin_source_trust_policy_patch_returns_not_found_for_unknown_key(
         headers={"Authorization": "Bearer admin-token"},
     )
     assert response.status_code == 404
+
+
+def test_admin_url_normalization_override_crud_and_filters(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001005")
+    auth_headers = {"Authorization": "Bearer admin-token"}
+    domain = "example.edu"
+
+    put_response = api_client.put(
+        f"/admin/url-normalization-overrides/{domain}",
+        json={
+            "strip_query_params": ["SessionId"],
+            "strip_query_prefixes": ["cmp_"],
+            "strip_www": True,
+            "force_https": True,
+            "enabled": True,
+        },
+        headers=auth_headers,
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["domain"] == domain
+    assert put_response.json()["strip_query_params"] == ["sessionid"]
+    assert put_response.json()["strip_query_prefixes"] == ["cmp_"]
+
+    created_operation = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'operation'
+            from provenance_events
+            where entity_type = 'url_normalization_override'
+              and event_type = 'override_upserted'
+              and payload->>'domain' = $1
+            order by id desc
+            limit 1
+            """,
+            domain,
+        )
+    )
+    assert created_operation == "created"
+
+    update_response = api_client.put(
+        f"/admin/url-normalization-overrides/{domain}",
+        json={
+            "strip_query_params": ["sessionid", "token"],
+            "strip_query_prefixes": ["cmp_", "trk_"],
+            "strip_www": False,
+            "force_https": True,
+            "enabled": True,
+        },
+        headers=auth_headers,
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["strip_query_params"] == ["sessionid", "token"]
+
+    updated_operation = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'operation'
+            from provenance_events
+            where entity_type = 'url_normalization_override'
+              and event_type = 'override_upserted'
+              and payload->>'domain' = $1
+            order by id desc
+            limit 1
+            """,
+            domain,
+        )
+    )
+    assert updated_operation == "updated"
+
+    list_response = api_client.get(
+        "/admin/url-normalization-overrides",
+        params={"domain": domain, "enabled": True},
+        headers=auth_headers,
+    )
+    assert list_response.status_code == 200
+    listed_rows = list_response.json()
+    assert len(listed_rows) == 1
+    assert listed_rows[0]["domain"] == domain
+
+    disable_response = api_client.patch(
+        f"/admin/url-normalization-overrides/{domain}",
+        json={"enabled": False},
+        headers=auth_headers,
+    )
+    assert disable_response.status_code == 200
+    assert disable_response.json()["enabled"] is False
+
+    previous_enabled = _run(
+        _fetchval(
+            database_url,
+            """
+            select payload->>'previous_enabled'
+            from provenance_events
+            where entity_type = 'url_normalization_override'
+              and event_type = 'override_enabled_changed'
+              and payload->>'domain' = $1
+            order by id desc
+            limit 1
+            """,
+            domain,
+        )
+    )
+    assert previous_enabled == "true"
+
+    enabled_filter_response = api_client.get(
+        "/admin/url-normalization-overrides",
+        params={"domain": domain, "enabled": True},
+        headers=auth_headers,
+    )
+    assert enabled_filter_response.status_code == 200
+    assert enabled_filter_response.json() == []
+
+    disabled_filter_response = api_client.get(
+        "/admin/url-normalization-overrides",
+        params={"domain": domain, "enabled": False},
+        headers=auth_headers,
+    )
+    assert disabled_filter_response.status_code == 200
+    disabled_rows = disabled_filter_response.json()
+    assert len(disabled_rows) == 1
+    assert disabled_rows[0]["enabled"] is False
+
+
+def test_admin_url_normalization_override_rejects_invalid_payload(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001006")
+    auth_headers = {"Authorization": "Bearer admin-token"}
+
+    invalid_domain_response = api_client.put(
+        "/admin/url-normalization-overrides/Invalid Domain",
+        json={
+            "strip_query_params": ["sessionid"],
+            "strip_query_prefixes": [],
+            "strip_www": True,
+            "force_https": True,
+            "enabled": True,
+        },
+        headers=auth_headers,
+    )
+    assert invalid_domain_response.status_code == 422
+    assert "domain" in invalid_domain_response.json()["detail"]
+
+    invalid_token_response = api_client.put(
+        "/admin/url-normalization-overrides/example.edu",
+        json={
+            "strip_query_params": ["invalid token"],
+            "strip_query_prefixes": [],
+            "strip_www": True,
+            "force_https": True,
+            "enabled": True,
+        },
+        headers=auth_headers,
+    )
+    assert invalid_token_response.status_code == 422
+    assert "strip_query_params" in invalid_token_response.json()["detail"]
 
 
 def test_admin_modules_list_and_toggle_enabled(
@@ -2948,7 +3255,9 @@ async def _truncate_integration_tables(database_url: str) -> None:
               evidence,
               discoveries,
               jobs,
-              provenance_events
+              provenance_events,
+              source_trust_policy,
+              url_normalization_overrides
             restart identity cascade
             """
         )
@@ -3051,6 +3360,41 @@ async def _upsert_source_trust_policy(
             auto_publish=auto_publish,
             requires_moderation=requires_moderation,
             rules_json=rules_json,
+        )
+    finally:
+        await repository.close()
+
+
+async def _upsert_url_normalization_override(
+    database_url: str,
+    *,
+    domain: str,
+    strip_query_params: list[str],
+    strip_query_prefixes: list[str],
+    strip_www: bool,
+    force_https: bool,
+    enabled: bool,
+) -> None:
+    settings = get_settings()
+    repository = PostgresRepository(
+        database_url=database_url,
+        min_pool_size=settings.database_pool_min_size,
+        max_pool_size=settings.database_pool_max_size,
+        job_max_attempts=settings.job_max_attempts,
+        job_retry_base_seconds=settings.job_retry_base_seconds,
+        job_retry_max_seconds=settings.job_retry_max_seconds,
+        freshness_check_interval_hours=settings.freshness_check_interval_hours,
+        freshness_stale_after_hours=settings.freshness_stale_after_hours,
+        freshness_archive_after_hours=settings.freshness_archive_after_hours,
+    )
+    try:
+        await repository.upsert_url_normalization_override(
+            domain=domain,
+            strip_query_params=strip_query_params,
+            strip_query_prefixes=strip_query_prefixes,
+            strip_www=strip_www,
+            force_https=force_https,
+            enabled=enabled,
         )
     finally:
         await repository.close()

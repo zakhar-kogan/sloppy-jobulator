@@ -24,8 +24,14 @@ async def create_discovery(
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
+    normalization_overrides_json: str | None = None
+    try:
+        normalization_overrides_json = await repository.get_enabled_url_normalization_overrides_json()
+    except RepositoryUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
     settings = get_settings()
-    normalization_overrides_json = settings.url_normalization_overrides_json
+
     normalization_overrides = parse_normalization_overrides(normalization_overrides_json)
     if not principal.actor_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid machine principal")
@@ -55,7 +61,6 @@ async def create_discovery(
             metadata=payload.metadata,
             actor_module_db_id=principal.actor_id,
             enqueue_redirect_resolution=enqueue_redirect_resolution,
-            normalization_overrides_json=normalization_overrides_json,
         )
     except RepositoryUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc

@@ -17,6 +17,11 @@ export default function ModeratorCockpitPage(): JSX.Element {
           </Link>
         </p>
         <p>
+          <Link href="/admin/url-normalization-overrides" className="inline-link">
+            Open URL normalization overrides console
+          </Link>
+        </p>
+        <p>
           <Link href="/" className="inline-link">
             Back to catalogue
           </Link>
