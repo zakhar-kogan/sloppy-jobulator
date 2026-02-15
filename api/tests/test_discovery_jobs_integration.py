@@ -63,6 +63,27 @@ def api_client(database_url: str) -> TestClient:
     get_settings.cache_clear()
 
 
+def _set_redirect_resolution_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    enabled: bool,
+    overrides_json: str | None = None,
+) -> None:
+    monkeypatch.setenv("SJ_ENABLE_REDIRECT_RESOLUTION_JOBS", "true" if enabled else "false")
+    if overrides_json is None:
+        monkeypatch.delenv("SJ_URL_NORMALIZATION_OVERRIDES_JSON", raising=False)
+    else:
+        monkeypatch.setenv("SJ_URL_NORMALIZATION_OVERRIDES_JSON", overrides_json)
+    get_settings.cache_clear()
+    get_repository.cache_clear()
+
+
+def _find_job(jobs: list[dict[str, Any]], *, kind: str, target_id: str) -> dict[str, Any]:
+    match = next((job for job in jobs if job.get("kind") == kind and job.get("target_id") == target_id), None)
+    assert match is not None
+    return match
+
+
 def test_discovery_enqueue_claim_result_and_projection_flow(api_client: TestClient, database_url: str) -> None:
     payload = {
         "origin_module_id": "local-connector",
@@ -247,9 +268,10 @@ def test_discovery_optional_redirect_resolution_job_updates_discovery(
     assert jobs_response.status_code == 200
     jobs = jobs_response.json()
     assert len(jobs) == 2
-    resolve_job = next((job for job in jobs if job["kind"] == "resolve_url_redirects"), None)
-    assert resolve_job is not None
+    resolve_job = _find_job(jobs, kind="resolve_url_redirects", target_id=discovery_id)
     resolve_job_id = resolve_job["id"]
+    assert isinstance(resolve_job.get("inputs_json"), dict)
+    assert resolve_job["inputs_json"].get("normalization_overrides_json") is None
 
     claim_response = api_client.post(
         f"/jobs/{resolve_job_id}/claim",
@@ -310,6 +332,91 @@ def test_discovery_optional_redirect_resolution_job_updates_discovery(
         )
     )
     assert redirect_event_count == 1
+
+
+def test_discovery_redirect_resolution_uses_setting_defaults_and_metadata_overrides(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_redirect_resolution_mode(monkeypatch, enabled=True)
+    first_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-redirect-setting-on",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "https://example.edu/jobs/redirect-setting-on",
+            "title_hint": "Redirect setting on",
+            "text_hint": "Redirect setting on",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert first_response.status_code == 202
+    first_discovery_id = first_response.json()["discovery_id"]
+
+    jobs_response = api_client.get("/jobs", headers=PROCESSOR_HEADERS)
+    assert jobs_response.status_code == 200
+    jobs = jobs_response.json()
+    assert len(jobs) == 2
+    _find_job(jobs, kind="extract", target_id=first_discovery_id)
+    _find_job(jobs, kind="resolve_url_redirects", target_id=first_discovery_id)
+
+    _set_redirect_resolution_mode(monkeypatch, enabled=True)
+    second_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-redirect-setting-off-by-metadata",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "https://example.edu/jobs/redirect-setting-off",
+            "title_hint": "Redirect setting off",
+            "text_hint": "Redirect setting off",
+            "metadata": {"source": "integration-test", "resolve_redirects": False},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert second_response.status_code == 202
+    second_discovery_id = second_response.json()["discovery_id"]
+
+    jobs_response = api_client.get("/jobs", headers=PROCESSOR_HEADERS)
+    assert jobs_response.status_code == 200
+    jobs = jobs_response.json()
+    matching_jobs = [job for job in jobs if job["target_id"] == second_discovery_id]
+    assert len(matching_jobs) == 1
+    assert matching_jobs[0]["kind"] == "extract"
+
+
+def test_discovery_redirect_resolution_job_receives_normalization_overrides_from_settings(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    overrides_json = '{"example.edu":{"strip_query_params":["sessionid"],"force_https":true}}'
+    _set_redirect_resolution_mode(monkeypatch, enabled=True, overrides_json=overrides_json)
+
+    discovery_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-redirect-overrides",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "http://example.edu/jobs/redirect-overrides?sessionId=abc&utm_source=feed",
+            "title_hint": "Redirect override",
+            "text_hint": "Redirect override",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert discovery_response.status_code == 202
+    discovery_id = discovery_response.json()["discovery_id"]
+
+    jobs_response = api_client.get("/jobs", headers=PROCESSOR_HEADERS)
+    assert jobs_response.status_code == 200
+    jobs = jobs_response.json()
+    resolve_job = _find_job(jobs, kind="resolve_url_redirects", target_id=discovery_id)
+    inputs = resolve_job.get("inputs_json")
+    assert isinstance(inputs, dict)
+    assert inputs.get("normalization_overrides_json") == overrides_json
 
 
 def test_expired_claimed_jobs_are_requeued(api_client: TestClient, database_url: str) -> None:

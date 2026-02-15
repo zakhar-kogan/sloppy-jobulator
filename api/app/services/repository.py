@@ -298,6 +298,7 @@ class PostgresRepository:
         metadata: dict[str, Any],
         actor_module_db_id: str,
         enqueue_redirect_resolution: bool = False,
+        normalization_overrides_json: str | None = None,
     ) -> str:
         pool = await self._get_pool()
 
@@ -431,20 +432,22 @@ class PostgresRepository:
                         json.dumps({"discovery_id": discovery_id}),
                     )
                     if enqueue_redirect_resolution and url:
+                        redirect_inputs: dict[str, Any] = {
+                            "discovery_id": discovery_id,
+                            "url": url,
+                            "normalized_url": normalized_url,
+                            "canonical_hash": canonical_hash,
+                        }
+                        raw_overrides = self._coerce_text(normalization_overrides_json)
+                        if raw_overrides:
+                            redirect_inputs["normalization_overrides_json"] = raw_overrides
                         await conn.execute(
                             """
                             insert into jobs (kind, target_type, target_id, inputs_json)
                             values ('resolve_url_redirects', 'discovery', $1::uuid, $2::jsonb)
                             """,
                             discovery_id,
-                            json.dumps(
-                                {
-                                    "discovery_id": discovery_id,
-                                    "url": url,
-                                    "normalized_url": normalized_url,
-                                    "canonical_hash": canonical_hash,
-                                }
-                            ),
+                            json.dumps(redirect_inputs),
                         )
                     await conn.execute(
                         """

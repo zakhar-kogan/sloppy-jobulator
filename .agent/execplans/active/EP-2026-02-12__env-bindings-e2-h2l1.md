@@ -3,7 +3,7 @@
 ## Metadata
 - Status: `ACTIVE`
 - Created: `2026-02-12`
-- Last Updated: `2026-02-12`
+- Last Updated: `2026-02-15`
 - Owner: `Codex`
 
 ## Purpose / Big Picture
@@ -35,6 +35,8 @@ Close the current critical backlog by wiring environment-bound staging/prod obse
 - 2026-02-12: Keep deploy workflow command-driven via environment-bound secrets to avoid hardcoding provider-specific deploy mechanics before infra commands are finalized.
 - 2026-02-12: Gate redirect job enqueue behind explicit discovery metadata signal for incremental rollout without perturbing existing ingest contract tests.
 - 2026-02-12: Added shared URL-normalization override semantics in API and workers (`strip_www`, `force_https`, custom query stripping) to align redirect resolution with eventual E1 per-domain policy support.
+- 2026-02-15: Promote redirect enqueue decisioning to settings-default + per-event metadata override semantics, and pass settings normalization override JSON through redirect job inputs so worker-side normalization stays aligned with E1 policy behavior.
+- 2026-02-15: Expand cockpit L1 breadth with selection-retarget cross-flow tests so moderation mutations track the active filtered row after queue page/filter changes.
 
 ## Plan of Work
 1. Environment bindings + staged deploy workflow
@@ -62,7 +64,7 @@ Close the current critical backlog by wiring environment-bound staging/prod obse
 
 ## Idempotence and Recovery
 1. Observability/deploy scripts are additive and environment-driven; rollback is file-level revert.
-2. Redirect resolution is incremental (metadata-gated enqueue) to minimize behavioral blast radius.
+2. Redirect resolution remains asynchronous; enqueue behavior is controllable via `SJ_ENABLE_REDIRECT_RESOLUTION_JOBS` with per-event metadata override for scoped rollback.
 3. E2E expansions are test-only and can be reverted independently if flaky.
 
 ## Outcomes and Retrospective

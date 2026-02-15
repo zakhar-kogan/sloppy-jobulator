@@ -609,3 +609,92 @@ test("candidate queue pagination and cross-flow actions target the selected row"
   const patchedTarget = patchTargets.at(-1) ?? "";
   expect(patchedTarget).toContain("/api/admin/candidates/22222222-2222-2222-2222-222222222222");
 });
+
+test("candidate selection retargets across filter pages before override submit", async ({ page }) => {
+  test.setTimeout(120_000);
+  const startedAt = "2026-02-10T20:02:39.338252Z";
+  const candidates: CandidateRecord[] = [
+    {
+      id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      state: "needs_review",
+      dedupe_confidence: 0.81,
+      risk_flags: [],
+      extracted_fields: { title: "Needs Review A" },
+      discovery_ids: ["d-a"],
+      posting_id: null,
+      created_at: startedAt,
+      updated_at: startedAt
+    },
+    {
+      id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      state: "needs_review",
+      dedupe_confidence: 0.77,
+      risk_flags: [],
+      extracted_fields: { title: "Needs Review B" },
+      discovery_ids: ["d-b"],
+      posting_id: null,
+      created_at: startedAt,
+      updated_at: startedAt
+    },
+    {
+      id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      state: "publishable",
+      dedupe_confidence: 0.91,
+      risk_flags: [],
+      extracted_fields: { title: "Publishable C" },
+      discovery_ids: ["d-c"],
+      posting_id: null,
+      created_at: startedAt,
+      updated_at: startedAt
+    }
+  ];
+  const overrideTargets: string[] = [];
+
+  await page.route(/\/api\/admin\/candidates(?:\?.*)?$/, async (route) => {
+    const url = new URL(route.request().url());
+    const state = url.searchParams.get("state");
+    const limit = Number(url.searchParams.get("limit") ?? "50");
+    const offset = Number(url.searchParams.get("offset") ?? "0");
+    const filtered = state && state !== "all" ? candidates.filter((candidate) => candidate.state === state) : candidates;
+    return jsonResponse(route, filtered.slice(offset, offset + limit));
+  });
+  await page.route(/\/api\/admin\/candidates\/[^/?]+\/override(?:\?.*)?$/, async (route) => {
+    overrideTargets.push(route.request().url());
+    const targetId = route.request().url().split("/").at(-2)?.split("?")[0] ?? "";
+    const body = route.request().postDataJSON() as { state: CandidateState; reason: string };
+    const target = candidates.find((candidate) => candidate.id === targetId);
+    if (!target) {
+      return route.fulfill({ status: 404 });
+    }
+    target.state = body.state;
+    return jsonResponse(route, target);
+  });
+  await page.route(/\/api\/admin\/modules(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+  await page.route(/\/api\/admin\/jobs(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+
+  const filters = page.locator("article:has(h2:text-is('Candidate Queue Filters'))");
+  await filters.getByLabel("State").selectOption("needs_review");
+  await filters.getByLabel("Limit").fill("1");
+  await filters.getByLabel("Offset").fill("1");
+  await filters.getByRole("button", { name: "Refresh Candidates" }).click();
+
+  const selectedActions = page.locator("article:has(h2:text-is('Selected Candidate Actions'))");
+  await expect(selectedActions).toContainText("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+
+  await filters.getByLabel("State").selectOption("publishable");
+  await filters.getByLabel("Offset").fill("0");
+  await filters.getByRole("button", { name: "Refresh Candidates" }).click();
+  await expect(selectedActions).toContainText("cccccccc-cccc-cccc-cccc-cccccccccccc");
+
+  const overrideForm = selectedActions.locator("form").nth(2);
+  await overrideForm.getByLabel("State").selectOption("rejected");
+  await overrideForm.getByLabel("Reason").fill("retargeted candidate override");
+  await overrideForm.getByRole("button", { name: "Apply Override" }).click();
+  await expect(page.getByText("Candidate override action completed for cccccccc-cccc-cccc-cccc-cccccccccccc.")).toBeVisible();
+
+  const overrideTarget = overrideTargets.at(-1) ?? "";
+  expect(overrideTarget).toContain("/api/admin/candidates/cccccccc-cccc-cccc-cccc-cccccccccccc/override");
+});

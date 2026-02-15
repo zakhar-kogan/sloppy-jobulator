@@ -28,6 +28,7 @@ type DiscoveryAccepted = {
 
 type Job = {
   id: string;
+  kind: string;
   target_id: string | null;
   status: string;
 };
@@ -106,7 +107,9 @@ async function createDiscoveryAndProcess(
   const jobsResp = await request.get(`${API_BASE_URL}/jobs`, { headers: PROCESSOR_HEADERS });
   expect(jobsResp.ok()).toBeTruthy();
   const jobs = (await jobsResp.json()) as Job[];
-  const job = jobs.find((row) => row.target_id === discovery.discovery_id && row.status === "queued");
+  const job = jobs.find(
+    (row) => row.kind === "extract" && row.target_id === discovery.discovery_id && row.status === "queued",
+  );
   expect(job).toBeDefined();
   const jobId = job!.id;
 
@@ -584,6 +587,72 @@ test("cockpit live queue pagination drives patch action against selected candida
       return publishable.some((candidate) => candidate.id === selectedCandidateId);
     })
     .toBeTruthy();
+});
+
+test("cockpit live retargets selected candidate after filter-page changes before override", async ({ page, request }) => {
+  const suffix = uniqueSuffix();
+  const first = await createDiscoveryAndProcess(
+    request,
+    `live-retarget-a-${suffix}`,
+    `live-retarget-a-${suffix}`,
+    `Live Retarget A ${suffix}`,
+    false,
+  );
+  const second = await createDiscoveryAndProcess(
+    request,
+    `live-retarget-b-${suffix}`,
+    `live-retarget-b-${suffix}`,
+    `Live Retarget B ${suffix}`,
+    false,
+  );
+  const third = await createDiscoveryAndProcess(
+    request,
+    `live-retarget-c-${suffix}`,
+    `live-retarget-c-${suffix}`,
+    `Live Retarget C ${suffix}`,
+    false,
+  );
+
+  const thirdCandidate = await findCandidateByDiscovery(request, third.discoveryId);
+  const thirdPromoteResp = await request.patch(`${API_BASE_URL}/candidates/${thirdCandidate.id}`, {
+    headers: ADMIN_HEADERS,
+    data: { state: "publishable", reason: "live retarget setup" },
+  });
+  expect(thirdPromoteResp.ok()).toBeTruthy();
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+
+  const queueFilters = page.locator("article:has(h2:text-is('Candidate Queue Filters'))");
+  await queueFilters.getByLabel("State").selectOption("needs_review");
+  await queueFilters.getByLabel("Limit").fill("1");
+  await queueFilters.getByLabel("Offset").fill("1");
+  await queueFilters.getByRole("button", { name: "Refresh Candidates" }).click();
+
+  const expectedNeedsReviewPage = await listCandidates(request, "state=needs_review&limit=1&offset=1");
+  expect(expectedNeedsReviewPage.length).toBe(1);
+  const selectedActions = page.locator("article:has(h2:text-is('Selected Candidate Actions'))");
+  await expect(selectedActions).toContainText(expectedNeedsReviewPage[0].id);
+
+  await queueFilters.getByLabel("State").selectOption("publishable");
+  await queueFilters.getByLabel("Offset").fill("0");
+  await queueFilters.getByRole("button", { name: "Refresh Candidates" }).click();
+  await expect(selectedActions).toContainText(thirdCandidate.id);
+
+  const overrideForm = selectedActions.locator("form").nth(2);
+  await overrideForm.getByLabel("State").selectOption("rejected");
+  await overrideForm.getByLabel("Reason").fill("live retarget override");
+  await overrideForm.getByRole("button", { name: "Apply Override" }).click();
+  await expect(page.getByText(`Candidate override action completed for ${thirdCandidate.id}.`)).toBeVisible();
+
+  await expect
+    .poll(async () => {
+      const rejected = await listCandidates(request, "state=rejected&limit=100");
+      return rejected.some((candidate) => candidate.id === thirdCandidate.id);
+    })
+    .toBeTruthy();
+
+  expect(first.discoveryId).not.toEqual(second.discoveryId);
 });
 
 test("cockpit live backend rejects non-admin and invalid requests", async ({ request }) => {
