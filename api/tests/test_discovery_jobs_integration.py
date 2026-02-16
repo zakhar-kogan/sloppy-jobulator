@@ -2430,7 +2430,7 @@ def test_dedupe_policy_auto_merges_high_confidence_duplicate_candidate(
     assert merge_actor_type == "machine"
 
 
-def test_dedupe_policy_routes_uncertain_match_to_review_queue(
+def test_dedupe_policy_ignores_weak_text_only_matches(
     api_client: TestClient,
     database_url: str,
 ) -> None:
@@ -2462,7 +2462,7 @@ def test_dedupe_policy_routes_uncertain_match_to_review_queue(
             secondary_candidate_id,
         )
     )
-    assert decision == "needs_review"
+    assert decision is None
 
     secondary_state = _run(
         _fetchval(
@@ -2486,9 +2486,9 @@ def test_dedupe_policy_routes_uncertain_match_to_review_queue(
         )
     )
 
-    assert secondary_state == "needs_review"
-    assert posting_status == "archived"
-    assert "manual_review_low_signal" in list(risk_flags or [])
+    assert secondary_state == "published"
+    assert posting_status == "active"
+    assert list(risk_flags or []) == []
 
 
 def test_trust_policy_blocks_publish_when_below_confidence_for_trusted_source(

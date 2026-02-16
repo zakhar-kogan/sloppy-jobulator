@@ -4089,7 +4089,6 @@ class PostgresRepository:
                 or ($2::text is not null and p.normalized_url = $2)
                 or ($3::text is not null and p.canonical_url = $3)
                 or ($4::text is not null and p.application_url = $4)
-                or ($5::text is not null and lower(p.organization_name) = lower($5))
               )
             order by pc.updated_at desc, pc.id asc
             limit 25
@@ -4098,7 +4097,6 @@ class PostgresRepository:
             normalized_url,
             canonical_url,
             application_url,
-            organization_name,
         )
         if not rows:
             return DedupePolicyDecision(
