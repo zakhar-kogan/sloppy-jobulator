@@ -50,7 +50,7 @@
 | K5 | not_started | Social connectors not implemented. |
 | L1 | done | Live E2E coverage now spans bulk moderation and legacy cockpit flows with deterministic queue-selection fixtures aligned to current candidate-state transitions; DB-backed targeted API redirect/admin/trust/postings integration slices and full live cockpit suite pass. |
 | L2 | not_started | Load/perf testing not implemented. |
-| M1 | in_progress | Quality CI is split into fast and DB-backed integration checks with explicit `migration-safety` + `deploy-readiness-gate`, and staged `deploy.yml` execution is validated (`staging` deploy run `22062434197` succeeded across API/workers/web); remaining execution work is production receipt plus optional observability gates once J2 permissions/bindings are resolved. |
+| M1 | in_progress | Quality CI is split into fast and DB-backed integration checks with explicit `migration-safety` + `deploy-readiness-gate`, and staged `deploy.yml` execution is validated (`staging` deploy run `22062434197` succeeded across API/workers/web); remaining execution work is production secret binding completion (`22062963729` failed at `Validate prod secret bindings`) plus optional observability gates once J2 permissions/bindings are resolved. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
 
 ## Next Implementation Steps (Priority Order)
