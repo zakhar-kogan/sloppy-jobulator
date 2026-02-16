@@ -1216,6 +1216,60 @@ def test_postings_edge_query_semantics_and_deterministic_tie_breaks(
     ]
 
 
+def test_postings_query_relevance_prioritizes_title_over_org_and_description(
+    api_client: TestClient,
+    database_url: str,
+) -> None:
+    _run(
+        _execute(
+            database_url,
+            """
+            insert into postings (
+              title,
+              canonical_url,
+              normalized_url,
+              canonical_hash,
+              organization_name,
+              status,
+              description_text,
+              created_at,
+              updated_at
+            )
+            values
+              ($1, $2, $2, $3, $4, 'active', $5, now() - interval '3 days', now() - interval '1 day'),
+              ($6, $7, $7, $8, $9, 'active', $10, now() - interval '2 days', now() - interval '2 days'),
+              ($11, $12, $12, $13, $14, 'active', $15, now() - interval '1 day', now() - interval '3 days')
+            """,
+            "Alpha Research Engineer",
+            "https://example.edu/jobs/relevance-title",
+            "g1-relevance-hash-1",
+            "Gamma Lab",
+            "focus on systems",
+            "Research Engineer",
+            "https://example.edu/jobs/relevance-org",
+            "g1-relevance-hash-2",
+            "Alpha Institute",
+            "organization match only",
+            "Research Engineer",
+            "https://example.edu/jobs/relevance-description",
+            "g1-relevance-hash-3",
+            "Delta Lab",
+            "this role supports alpha workflows",
+        )
+    )
+
+    response = api_client.get(
+        "/postings",
+        params={"q": "alpha", "sort_by": "updated_at", "sort_dir": "asc"},
+    )
+    assert response.status_code == 200
+    assert [row["title"] for row in response.json()] == [
+        "Alpha Research Engineer",
+        "Research Engineer",
+        "Research Engineer",
+    ]
+
+
 def test_moderation_candidate_state_transitions_update_posting_status(
     api_client: TestClient,
     database_url: str,

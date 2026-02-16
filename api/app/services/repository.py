@@ -2827,6 +2827,7 @@ class PostgresRepository:
         pool = await self._get_pool()
         conditions: list[str] = []
         params: list[Any] = []
+        relevance_rank_sql: str | None = None
 
         def bind(value: Any) -> str:
             params.append(value)
@@ -2837,6 +2838,21 @@ class PostgresRepository:
             token = bind(f"%{normalized_q}%")
             conditions.append(
                 f"(p.title ilike {token} or p.organization_name ilike {token} or coalesce(p.description_text, '') ilike {token})"
+            )
+            normalized_q_lower = normalized_q.lower()
+            exact_token = bind(normalized_q_lower)
+            prefix_token = bind(f"{normalized_q_lower}%")
+            contains_token = bind(f"%{normalized_q_lower}%")
+            relevance_rank_sql = (
+                "case "
+                f"when lower(p.title) = {exact_token} then 600 "
+                f"when lower(p.title) like {prefix_token} then 500 "
+                f"when lower(p.title) like {contains_token} then 400 "
+                f"when lower(p.organization_name) = {exact_token} then 300 "
+                f"when lower(p.organization_name) like {prefix_token} then 250 "
+                f"when lower(p.organization_name) like {contains_token} then 200 "
+                f"when lower(coalesce(p.description_text, '')) like {contains_token} then 100 "
+                "else 0 end"
             )
 
         normalized_org = self._coerce_text(organization_name)
@@ -2867,6 +2883,8 @@ class PostgresRepository:
             order_by_sql = f"({sort_expr} is null) asc, {sort_expr} {direction}, {tie_break_sql}"
         else:
             order_by_sql = f"{sort_expr} {direction}, {tie_break_sql}"
+        if relevance_rank_sql is not None:
+            order_by_sql = f"{relevance_rank_sql} desc, {order_by_sql}"
 
         limit_token = bind(limit)
         offset_token = bind(offset)
