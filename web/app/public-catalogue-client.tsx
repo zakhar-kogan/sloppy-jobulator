@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 type PostingStatus = "active" | "stale" | "archived" | "closed";
 type SortBy = "created_at" | "updated_at" | "deadline" | "published_at";
@@ -41,6 +42,12 @@ type PostingDetail = {
 type RemoteFilter = "all" | "remote" | "onsite";
 type StatusFilter = "all" | PostingStatus;
 
+const VALID_SORT_BY = new Set<SortBy>(["created_at", "updated_at", "deadline", "published_at"]);
+const VALID_SORT_DIR = new Set<SortDir>(["asc", "desc"]);
+const VALID_REMOTE_FILTER = new Set<RemoteFilter>(["all", "remote", "onsite"]);
+const VALID_STATUS_FILTER = new Set<StatusFilter>(["all", "active", "stale", "archived", "closed"]);
+const VALID_LIMITS = new Set([10, 20, 50]);
+
 function encodeQuery(params: Record<string, string | number | boolean | undefined>): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -76,17 +83,54 @@ function getApiErrorDetail(payload: unknown, fallback: string): string {
   return fallback;
 }
 
+function readEnumParam<T extends string>(value: string | null, valid: Set<T>, fallback: T): T {
+  if (value && valid.has(value as T)) {
+    return value as T;
+  }
+  return fallback;
+}
+
+function readLimitParam(value: string | null): number {
+  if (!value) {
+    return 20;
+  }
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && VALID_LIMITS.has(parsed)) {
+    return parsed;
+  }
+  return 20;
+}
+
+function readOffsetParam(value: string | null): number {
+  if (!value) {
+    return 0;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return 0;
+  }
+  return parsed;
+}
+
 export function PublicCatalogueClient(): JSX.Element {
-  const [q, setQ] = useState("");
-  const [organization, setOrganization] = useState("");
-  const [country, setCountry] = useState("");
-  const [tag, setTag] = useState("");
-  const [remoteFilter, setRemoteFilter] = useState<RemoteFilter>("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
-  const [sortBy, setSortBy] = useState<SortBy>("updated_at");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [limit, setLimit] = useState(20);
-  const [offset, setOffset] = useState(0);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [q, setQ] = useState(() => searchParams.get("q") ?? "");
+  const [organization, setOrganization] = useState(() => searchParams.get("organization_name") ?? "");
+  const [country, setCountry] = useState(() => searchParams.get("country") ?? "");
+  const [tag, setTag] = useState(() => searchParams.get("tag") ?? "");
+  const [remoteFilter, setRemoteFilter] = useState<RemoteFilter>(() =>
+    readEnumParam(searchParams.get("remote_filter"), VALID_REMOTE_FILTER, "all")
+  );
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(() =>
+    readEnumParam(searchParams.get("status"), VALID_STATUS_FILTER, "active")
+  );
+  const [sortBy, setSortBy] = useState<SortBy>(() => readEnumParam(searchParams.get("sort_by"), VALID_SORT_BY, "updated_at"));
+  const [sortDir, setSortDir] = useState<SortDir>(() => readEnumParam(searchParams.get("sort_dir"), VALID_SORT_DIR, "desc"));
+  const [limit, setLimit] = useState(() => readLimitParam(searchParams.get("limit")));
+  const [offset, setOffset] = useState(() => readOffsetParam(searchParams.get("offset")));
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
 
   const [rows, setRows] = useState<PostingListRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -104,6 +148,7 @@ export function PublicCatalogueClient(): JSX.Element {
         organization_name: organization,
         country,
         tag,
+        remote_filter: remoteFilter,
         remote: remoteFilter === "all" ? undefined : remoteFilter === "remote",
         status: statusFilter === "all" ? undefined : statusFilter,
         sort_by: sortBy,
@@ -113,6 +158,19 @@ export function PublicCatalogueClient(): JSX.Element {
       }),
     [country, limit, offset, organization, q, remoteFilter, sortBy, sortDir, statusFilter, tag]
   );
+
+  useEffect(() => {
+    const url = queryString.length > 0 ? `${pathname}?${queryString}` : pathname;
+    router.replace(url, { scroll: false });
+  }, [pathname, queryString, router]);
+
+  useEffect(() => {
+    if (!shareNotice) {
+      return;
+    }
+    const timer = window.setTimeout(() => setShareNotice(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [shareNotice]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -200,6 +258,17 @@ export function PublicCatalogueClient(): JSX.Element {
     setSortDir("desc");
     setLimit(20);
     setOffset(0);
+    setShareNotice(null);
+  }
+
+  async function handleCopySearchLink(): Promise<void> {
+    const fullUrl = queryString.length > 0 ? `${window.location.origin}${pathname}?${queryString}` : `${window.location.origin}${pathname}`;
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      setShareNotice("Search link copied.");
+    } catch {
+      setShareNotice("Unable to copy link.");
+    }
   }
 
   return (
@@ -335,6 +404,9 @@ export function PublicCatalogueClient(): JSX.Element {
         <button className="button" type="button" onClick={handleResetFilters}>
           Reset Filters
         </button>
+        <button className="button" type="button" onClick={() => void handleCopySearchLink()}>
+          Copy Search Link
+        </button>
         <button
           className="button"
           type="button"
@@ -352,6 +424,7 @@ export function PublicCatalogueClient(): JSX.Element {
           Next
         </button>
         <p className="status">Offset {offset} · Showing {rows.length} row(s)</p>
+        {shareNotice ? <p className="status">{shareNotice}</p> : null}
       </div>
 
       {loading ? <p className="status">Loading postings…</p> : null}
