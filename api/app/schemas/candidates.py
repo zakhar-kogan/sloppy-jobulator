@@ -13,6 +13,7 @@ CandidateState = Literal[
     "archived",
     "needs_review",
 ]
+CandidateAgeBucket = Literal["lt_24h", "d1_3", "d3_7", "gt_7d"]
 
 PostingStatus = Literal["active", "stale", "archived", "closed"]
 
@@ -54,3 +55,15 @@ class CandidateEventOut(BaseModel):
     actor_id: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+
+
+class CandidateFacetOut(BaseModel):
+    value: str
+    count: int
+
+
+class CandidateFacetsOut(BaseModel):
+    total: int
+    states: list[CandidateFacetOut] = Field(default_factory=list)
+    sources: list[CandidateFacetOut] = Field(default_factory=list)
+    ages: list[CandidateFacetOut] = Field(default_factory=list)

@@ -7,6 +7,9 @@ import {
   type AdminJob,
   type AdminModule,
   type Candidate,
+  type CandidateAgeBucket,
+  type CandidateFacet,
+  type CandidateQueueFacets,
   type CandidateState,
   formatTimestamp,
   getApiErrorDetail,
@@ -45,6 +48,7 @@ const MAINTENANCE_CONFIRM_TOKEN = "CONFIRM";
 
 type BoolFilter = "all" | "true" | "false";
 type CandidateStateFilter = "all" | CandidateState;
+type CandidateAgeFilter = "all" | CandidateAgeBucket;
 type ModuleKindFilter = "all" | ModuleKind;
 type JobKindFilter = "all" | JobKind;
 type JobStatusFilter = "all" | JobStatus;
@@ -52,6 +56,12 @@ type JobStatusFilter = "all" | JobStatus;
 type CandidateAction = "patch" | "merge" | "override";
 
 const PATCH_REASON_REQUIRED_STATES = new Set<CandidateState>(["rejected", "archived", "closed"]);
+const QUEUE_AGE_BUCKETS: Array<{ value: CandidateAgeBucket; label: string }> = [
+  { value: "lt_24h", label: "<24h" },
+  { value: "d1_3", label: "1-3d" },
+  { value: "d3_7", label: "3-7d" },
+  { value: "gt_7d", label: "7d+" }
+];
 const OPERATOR_TIMESTAMP = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short"
@@ -154,11 +164,48 @@ function describeRedirectVisibility(job: AdminJob): string[] {
   return details;
 }
 
+function parseCandidateFacets(payload: unknown): CandidateQueueFacets {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Candidate facets response is invalid.");
+  }
+  const asFacets = payload as Partial<CandidateQueueFacets>;
+  const toFacetArray = (value: unknown): CandidateFacet[] =>
+    Array.isArray(value)
+      ? value
+          .filter((item): item is CandidateFacet => {
+            if (!item || typeof item !== "object") {
+              return false;
+            }
+            const typed = item as Partial<CandidateFacet>;
+            return typeof typed.value === "string" && typeof typed.count === "number" && Number.isFinite(typed.count);
+          })
+          .map((item) => ({ value: item.value, count: item.count }))
+      : [];
+
+  const total = typeof asFacets.total === "number" && Number.isFinite(asFacets.total) ? asFacets.total : 0;
+  return {
+    total,
+    states: toFacetArray(asFacets.states),
+    sources: toFacetArray(asFacets.sources),
+    ages: toFacetArray(asFacets.ages)
+  };
+}
+
 export function ModeratorCockpitClient(): JSX.Element {
   const [candidateStateFilter, setCandidateStateFilter] = useState<CandidateStateFilter>("needs_review");
+  const [candidateSourceFilter, setCandidateSourceFilter] = useState("all");
+  const [candidateAgeFilter, setCandidateAgeFilter] = useState<CandidateAgeFilter>("all");
   const [candidateLimit, setCandidateLimit] = useState(50);
   const [candidateOffset, setCandidateOffset] = useState(0);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [candidateFacets, setCandidateFacets] = useState<CandidateQueueFacets>({
+    total: 0,
+    states: [],
+    sources: [],
+    ages: []
+  });
+  const [candidateFacetLoading, setCandidateFacetLoading] = useState(false);
+  const [candidateFacetError, setCandidateFacetError] = useState<string | null>(null);
   const [candidateListLoading, setCandidateListLoading] = useState(false);
   const [candidateListError, setCandidateListError] = useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>("");
@@ -208,10 +255,12 @@ export function ModeratorCockpitClient(): JSX.Element {
     () =>
       encodeAdminQuery({
         state: candidateStateFilter === "all" ? undefined : candidateStateFilter,
+        source: candidateSourceFilter === "all" ? undefined : candidateSourceFilter,
+        age: candidateAgeFilter === "all" ? undefined : candidateAgeFilter,
         limit: candidateLimit,
         offset: candidateOffset
       }),
-    [candidateLimit, candidateOffset, candidateStateFilter]
+    [candidateAgeFilter, candidateLimit, candidateOffset, candidateSourceFilter, candidateStateFilter]
   );
 
   const moduleQueryString = useMemo(
@@ -261,6 +310,21 @@ export function ModeratorCockpitClient(): JSX.Element {
     () => candidates.filter((candidate) => candidate.id !== selectedCandidateId),
     [candidates, selectedCandidateId]
   );
+  const stateFacetCountByValue = useMemo(
+    () => new Map(candidateFacets.states.map((item) => [item.value, item.count])),
+    [candidateFacets.states]
+  );
+  const ageFacetCountByValue = useMemo(
+    () => new Map(candidateFacets.ages.map((item) => [item.value, item.count])),
+    [candidateFacets.ages]
+  );
+  const sourceFacetOptions = useMemo(() => {
+    const ranked = [...candidateFacets.sources].sort((left, right) => right.count - left.count || left.value.localeCompare(right.value));
+    if (candidateSourceFilter === "all" || ranked.some((item) => item.value === candidateSourceFilter)) {
+      return ranked;
+    }
+    return [{ value: candidateSourceFilter, count: 0 }, ...ranked];
+  }, [candidateFacets.sources, candidateSourceFilter]);
   const patchSubmitDisabled =
     candidateActionBusy !== null || !selectedCandidateId || (requiresPatchReason(patchState) && patchReason.trim().length === 0);
   const mergeSubmitDisabled =
@@ -311,6 +375,28 @@ export function ModeratorCockpitClient(): JSX.Element {
       setCandidateListLoading(false);
     }
   }, [candidateQueryString, selectedCandidateId]);
+
+  const loadCandidateFacets = useCallback(async () => {
+    setCandidateFacetLoading(true);
+    setCandidateFacetError(null);
+    try {
+      const response = await fetch("/api/admin/candidates/facets", {
+        method: "GET",
+        cache: "no-store"
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(getApiErrorDetail(payload, "Failed to load candidate facets."));
+      }
+      setCandidateFacets(parseCandidateFacets(payload));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Failed to load candidate facets.";
+      setCandidateFacetError(detail);
+      setCandidateFacets({ total: 0, states: [], sources: [], ages: [] });
+    } finally {
+      setCandidateFacetLoading(false);
+    }
+  }, []);
 
   const loadModules = useCallback(async () => {
     setModuleListLoading(true);
@@ -371,6 +457,10 @@ export function ModeratorCockpitClient(): JSX.Element {
   }, [loadCandidates]);
 
   useEffect(() => {
+    void loadCandidateFacets();
+  }, [loadCandidateFacets]);
+
+  useEffect(() => {
     void loadModules();
   }, [loadModules]);
 
@@ -404,6 +494,21 @@ export function ModeratorCockpitClient(): JSX.Element {
 
   function handleClearCandidateSelection(): void {
     setSelectedCandidateIds([]);
+  }
+
+  function applyCandidateStateFilter(value: CandidateStateFilter): void {
+    setCandidateStateFilter(value);
+    setCandidateOffset(0);
+  }
+
+  function applyCandidateSourceFilter(value: string): void {
+    setCandidateSourceFilter(value);
+    setCandidateOffset(0);
+  }
+
+  function applyCandidateAgeFilter(value: CandidateAgeFilter): void {
+    setCandidateAgeFilter(value);
+    setCandidateOffset(0);
   }
 
   async function runCandidateAction(action: CandidateAction, body: Record<string, unknown>): Promise<void> {
@@ -650,12 +755,36 @@ export function ModeratorCockpitClient(): JSX.Element {
             <span>State</span>
             <select
               value={candidateStateFilter}
-              onChange={(event) => setCandidateStateFilter(event.target.value as CandidateStateFilter)}
+              onChange={(event) => applyCandidateStateFilter(event.target.value as CandidateStateFilter)}
             >
               <option value="all">all</option>
               {CANDIDATE_STATES.map((option) => (
                 <option key={option} value={option}>
                   {option}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="control">
+            <span>Source</span>
+            <select value={candidateSourceFilter} onChange={(event) => applyCandidateSourceFilter(event.target.value)}>
+              <option value="all">all</option>
+              {sourceFacetOptions.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.value}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="control">
+            <span>Age</span>
+            <select value={candidateAgeFilter} onChange={(event) => applyCandidateAgeFilter(event.target.value as CandidateAgeFilter)}>
+              <option value="all">all</option>
+              {QUEUE_AGE_BUCKETS.map((bucket) => (
+                <option key={bucket.value} value={bucket.value}>
+                  {bucket.label}
                 </option>
               ))}
             </select>
@@ -691,9 +820,92 @@ export function ModeratorCockpitClient(): JSX.Element {
           </label>
         </div>
 
+        <div className="facet-groups">
+          <p className="status">
+            Quick filters with queue counts by <code>state</code>, <code>source</code>, and <code>age</code>.
+          </p>
+          <div className="facet-row">
+            <button
+              className={`facet-chip ${candidateStateFilter === "all" ? "facet-chip-active" : ""}`}
+              type="button"
+              onClick={() => applyCandidateStateFilter("all")}
+            >
+              state: all <span className="facet-chip-count">{candidateFacets.total}</span>
+            </button>
+            {CANDIDATE_STATES.map((state) => (
+              <button
+                key={`state-${state}`}
+                className={`facet-chip ${candidateStateFilter === state ? "facet-chip-active" : ""}`}
+                type="button"
+                onClick={() => applyCandidateStateFilter(state)}
+              >
+                {state} <span className="facet-chip-count">{stateFacetCountByValue.get(state) ?? 0}</span>
+              </button>
+            ))}
+          </div>
+          <div className="facet-row">
+            <button
+              className={`facet-chip ${candidateSourceFilter === "all" ? "facet-chip-active" : ""}`}
+              type="button"
+              onClick={() => applyCandidateSourceFilter("all")}
+            >
+              source: all <span className="facet-chip-count">{candidateFacets.total}</span>
+            </button>
+            {sourceFacetOptions.slice(0, 8).map((sourceFacet) => (
+              <button
+                key={`source-${sourceFacet.value}`}
+                className={`facet-chip ${candidateSourceFilter === sourceFacet.value ? "facet-chip-active" : ""}`}
+                type="button"
+                onClick={() => applyCandidateSourceFilter(sourceFacet.value)}
+              >
+                {sourceFacet.value} <span className="facet-chip-count">{sourceFacet.count}</span>
+              </button>
+            ))}
+          </div>
+          <div className="facet-row">
+            <button
+              className={`facet-chip ${candidateAgeFilter === "all" ? "facet-chip-active" : ""}`}
+              type="button"
+              onClick={() => applyCandidateAgeFilter("all")}
+            >
+              age: all <span className="facet-chip-count">{candidateFacets.total}</span>
+            </button>
+            {QUEUE_AGE_BUCKETS.map((bucket) => (
+              <button
+                key={`age-${bucket.value}`}
+                className={`facet-chip ${candidateAgeFilter === bucket.value ? "facet-chip-active" : ""}`}
+                type="button"
+                onClick={() => applyCandidateAgeFilter(bucket.value)}
+              >
+                {bucket.label} <span className="facet-chip-count">{ageFacetCountByValue.get(bucket.value) ?? 0}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="actions">
-          <button className="button button-primary" type="button" onClick={() => void loadCandidates()}>
+          <button
+            className="button button-primary"
+            type="button"
+            onClick={() =>
+              void Promise.all([
+                loadCandidates(),
+                loadCandidateFacets()
+              ])
+            }
+          >
             Refresh Candidates
+          </button>
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              applyCandidateStateFilter("all");
+              applyCandidateSourceFilter("all");
+              applyCandidateAgeFilter("all");
+            }}
+          >
+            Reset Quick Filters
           </button>
           <button className="button" type="button" onClick={handleSelectAllCandidatesOnPage} disabled={candidates.length === 0}>
             Select All On Page
@@ -706,6 +918,8 @@ export function ModeratorCockpitClient(): JSX.Element {
           </p>
           {candidateListLoading ? <p className="status">Loading candidates…</p> : null}
           {candidateListError ? <p className="status status-error">{candidateListError}</p> : null}
+          {candidateFacetLoading ? <p className="status">Loading queue facets…</p> : null}
+          {candidateFacetError ? <p className="status status-error">{candidateFacetError}</p> : null}
           {candidateMessage ? <p className="status status-ok">{candidateMessage}</p> : null}
           {candidateActionError ? <p className="status status-error">{candidateActionError}</p> : null}
           {bulkActionMessage ? <p className="status status-ok">{bulkActionMessage}</p> : null}

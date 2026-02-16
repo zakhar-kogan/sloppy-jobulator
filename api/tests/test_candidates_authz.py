@@ -70,11 +70,36 @@ class FakeModerationRepository:
             }
         ]
 
-    async def list_candidates(self, limit: int, offset: int, state: str | None) -> list[dict[str, Any]]:
+    async def list_candidates(
+        self,
+        limit: int,
+        offset: int,
+        state: str | None,
+        source: str | None = None,
+        age: str | None = None,
+    ) -> list[dict[str, Any]]:
         rows = self._candidates
         if state:
             rows = [row for row in rows if row["state"] == state]
         return rows[offset : offset + limit]
+
+    async def list_candidate_facets(
+        self,
+        *,
+        state: str | None = None,
+        source: str | None = None,
+        age: str | None = None,
+    ) -> dict[str, Any]:
+        rows = self._candidates
+        if state:
+            rows = [row for row in rows if row["state"] == state]
+        total = len(rows)
+        return {
+            "total": total,
+            "states": [{"value": "needs_review", "count": total}] if total else [],
+            "sources": [{"value": "integration-test", "count": total}] if total else [],
+            "ages": [{"value": "lt_24h", "count": total}] if total else [],
+        }
 
     async def update_candidate_state(
         self,
@@ -231,6 +256,29 @@ def test_candidates_patch_denies_user_role(authz_client: TestClient, monkeypatch
         headers={"Authorization": "Bearer token"},
     )
     assert response.status_code == 403
+
+
+def test_candidates_facets_denies_user_role(authz_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_supabase_user(
+        monkeypatch,
+        {"id": "user-1", "app_metadata": {"role": "user"}},
+    )
+
+    response = authz_client.get("/candidates/facets", headers={"Authorization": "Bearer token"})
+    assert response.status_code == 403
+
+
+def test_candidates_facets_allows_moderator(authz_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_supabase_user(
+        monkeypatch,
+        {"id": "moderator-1", "app_metadata": {"role": "moderator"}},
+    )
+
+    response = authz_client.get("/candidates/facets", headers={"Authorization": "Bearer token"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["states"][0]["value"] == "needs_review"
 
 
 def test_candidates_patch_allows_admin(authz_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

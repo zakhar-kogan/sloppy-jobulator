@@ -1550,6 +1550,78 @@ def test_candidates_list_state_filter_with_human_auth(
     assert rows[0]["id"] == candidate_id
 
 
+def test_candidates_facets_include_state_source_and_age_counts(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="moderator", user_id="00000000-0000-0000-0000-000000000778")
+    recent_candidate_id, _ = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-facets-recent",
+        canonical_hash="facets-hash-recent",
+        source_key="tests:facet-recent",
+    )
+    stale_candidate_id, _ = _create_projected_candidate_and_posting(
+        api_client,
+        database_url,
+        external_id="ext-facets-stale",
+        canonical_hash="facets-hash-stale",
+        source_key="tests:facet-stale",
+    )
+
+    _run(
+        _execute(
+            database_url,
+            """
+            update posting_candidates
+            set updated_at = now() - interval '10 days'
+            where id = $1::uuid
+            """,
+            stale_candidate_id,
+        )
+    )
+
+    facets_response = api_client.get(
+        "/candidates/facets",
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert facets_response.status_code == 200
+    facets = facets_response.json()
+    assert facets["total"] == 2
+    assert sum(item["count"] for item in facets["states"]) == 2
+    assert any(item["value"] == "tests:facet-recent" and item["count"] == 1 for item in facets["sources"])
+    assert any(item["value"] == "tests:facet-stale" and item["count"] == 1 for item in facets["sources"])
+    assert any(item["value"] == "lt_24h" and item["count"] >= 1 for item in facets["ages"])
+    age_filtered_response = api_client.get(
+        "/candidates",
+        params={"age": "lt_24h"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert age_filtered_response.status_code == 200
+    assert len(age_filtered_response.json()) == 2
+
+    filtered_facets_response = api_client.get(
+        "/candidates/facets",
+        params={"source": "tests:facet-recent"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert filtered_facets_response.status_code == 200
+    filtered_facets = filtered_facets_response.json()
+    assert filtered_facets["total"] == 1
+    assert any(item["value"] == "tests:facet-recent" and item["count"] == 1 for item in filtered_facets["sources"])
+    filtered_candidates_response = api_client.get(
+        "/candidates",
+        params={"source": "tests:facet-recent"},
+        headers={"Authorization": "Bearer moderator-token"},
+    )
+    assert filtered_candidates_response.status_code == 200
+    filtered_candidates = filtered_candidates_response.json()
+    assert len(filtered_candidates) == 1
+    assert filtered_candidates[0]["id"] == recent_candidate_id
+
+
 def test_moderation_merge_candidates_reassigns_posting_and_records_audit(
     api_client: TestClient,
     database_url: str,

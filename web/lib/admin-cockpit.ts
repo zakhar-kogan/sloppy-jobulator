@@ -9,6 +9,7 @@ export type CandidateState =
   | "needs_review";
 
 export type PostingStatus = "active" | "stale" | "archived" | "closed";
+export type CandidateAgeBucket = "lt_24h" | "d1_3" | "d3_7" | "gt_7d";
 
 export type Candidate = {
   id: string;
@@ -59,6 +60,18 @@ export type AdminJob = {
 
 export type AdminCountResult = {
   count: number;
+};
+
+export type CandidateFacet = {
+  value: string;
+  count: number;
+};
+
+export type CandidateQueueFacets = {
+  total: number;
+  states: CandidateFacet[];
+  sources: CandidateFacet[];
+  ages: CandidateFacet[];
 };
 
 export function getApiErrorDetail(payload: unknown, fallback: string): string {

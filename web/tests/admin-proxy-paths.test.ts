@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildCandidatesFacetsPath,
   buildCandidateMergePath,
   buildCandidateOverridePath,
   buildCandidatePatchPath,
@@ -21,6 +22,11 @@ test("buildCandidatesListPath preserves query string", () => {
 test("buildCandidatesListPath returns base path without query", () => {
   const requestUrl = "https://example.local/api/admin/candidates";
   assert.equal(buildCandidatesListPath(requestUrl), "/candidates");
+});
+
+test("buildCandidatesFacetsPath preserves query string", () => {
+  const requestUrl = "https://example.local/api/admin/candidates/facets?state=needs_review&source=test";
+  assert.equal(buildCandidatesFacetsPath(requestUrl), "/candidates/facets?state=needs_review&source=test");
 });
 
 test("candidate mutation paths encode candidate ids", () => {

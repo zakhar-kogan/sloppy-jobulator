@@ -14,18 +14,18 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API/worker runtime, observability baseline, and deploy/migration safety gates.
-Now: E2/H2/public increments plus F2 trust-policy fallback hardening and L1 live cockpit rebaseline are validated; `G1/H1` relevance+share UX polish landed, and staging deploy execution proof is green.
+Now: E2/H2/public increments plus F2 trust-policy fallback hardening and L1 live cockpit rebaseline are validated; H2 queue facets + quick-filter chips are shipped, and staging deploy execution proof is green.
 Next: Resolve `J1/J2` environment blockers (worker telemetry series + dashboard IAM / alert-policy rollout), then capture production deploy receipt for `M1`.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
 - 2026-02-16 `[CODE]` Completed ordered product increment set with four commits: `013f8d2` (E2 cockpit redirect visibility), `53d8506` (H2 bulk/operator UX hardening), `7716ae3` (L1 live bulk moderation E2E), `acb8369` (public API-backed catalogue/search UX).
+- 2026-02-16 `[CODE]` Shipped H2 cockpit queue facets and quick filters: added `/candidates/facets` (state/source/age counts), candidate `source`/`age` list filters, admin proxy route wiring, and one-click cockpit facet chips.
 - 2026-02-16 `[CODE]` Closed trust-policy fallback and live cockpit rebaseline gaps: trusted/semi-trusted fallback defaults now enforce confidence-aware auto-publish behavior, and live cockpit E2E fixtures explicitly seed/select deterministic queue states.
 - 2026-02-15 `[CODE]` Completed E1 persisted URL normalization overrides: added `url_normalization_overrides` DB table/trigger, admin CRUD+toggle API (`/admin/url-normalization-overrides`), repository validation/audit events, and shared persisted override hydration for ingest + redirect claim path.
 - 2026-02-15 `[CODE]` Updated E2 discovery enqueue semantics to use `SJ_ENABLE_REDIRECT_RESOLUTION_JOBS` defaults with per-event metadata override (`resolve_redirects`), propagated normalization overrides into `resolve_url_redirects` job inputs, and expanded cockpit E2E retargeting cross-flow coverage.
 - 2026-02-15 `[CODE]` Stabilized live cockpit merge-conflict E2E assertion to accept backend conflict detail or equivalent self-merge guardrail text while preserving no-merge event verification.
 - 2026-02-11 `[CODE]` Hardened J1 OTel bootstrap to avoid default local OTLP export failures when no collector endpoint is configured (instrumentation remains enabled; exporter activates only when endpoint env is set), and revalidated DB integration + live cockpit E2E post-change.
-- 2026-02-11 `[CODE]` Added J1 OTel baseline (`api/app/core/telemetry.py`, `workers/app/core/telemetry.py`) plus worker/client spans and API request logging correlation, added J2 dashboard/alert artifacts (`docs/observability/**`), and added M1 CI safety gates (`migration-safety`, `deploy-readiness-gate`, `scripts/migration-safety-gate.sh`).
 
 ## Working set
 - 2026-02-08 `[ASSUMPTION]` Target stack remains Next.js + FastAPI + Supabase + Cloud Run per spec.
@@ -37,6 +37,7 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-08 `[CODE]` D-001 through D-004 active in `.agent/DECISIONS.md`.
 
 ## Receipts
+- 2026-02-16 `[TOOL]` `uv run --project api --extra dev pytest api/tests/test_candidates_authz.py -q -> fnm exec --using 24.13.0 pnpm --dir web run test:contracts -- admin-proxy-paths.test.ts -> make db-up -> make db-reset -> (escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k candidates_facets_include_state_source_and_age_counts -q -> fnm exec --using 24.13.0 pnpm --dir web run typecheck -> make db-down` passed.
 - 2026-02-16 `[TOOL]` `make db-up -> make db-reset -> (escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "redirect or admin_jobs" -> make db-down` passed (`6/6` selected DB-backed API tests).
 - 2026-02-16 `[TOOL]` `SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live` failed (`3/8` pass): failures are in pre-existing live cockpit scenarios that assume `needs_review` candidates on filtered pages and old patch-option expectations (`closed` absent).
 - 2026-02-16 `[TOOL]` `make db-up -> make db-reset -> (escalated) SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k trust_policy -> (escalated) ... -k postings -> (escalated) fnm exec --using 24.13.0 pnpm --dir web exec playwright test -c playwright.live.config.ts web/tests-e2e/admin-cockpit.live.spec.ts --reporter=line` passed (`16/16` trust-policy slice, `4/4` postings slice, `8/8` live cockpit).

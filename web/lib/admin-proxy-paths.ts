@@ -7,6 +7,10 @@ export function buildCandidatesListPath(requestUrl: string): string {
   return withOptionalQuery("/candidates", requestUrl);
 }
 
+export function buildCandidatesFacetsPath(requestUrl: string): string {
+  return withOptionalQuery("/candidates/facets", requestUrl);
+}
+
 export function buildCandidatePatchPath(candidateId: string): string {
   return `/candidates/${encodeURIComponent(candidateId)}`;
 }

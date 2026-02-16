@@ -81,6 +81,7 @@ SOURCE_POLICY_ROUTE_LABEL_RE = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
 MODULE_KINDS = {"connector", "processor"}
 JOB_KINDS = {"dedupe", "extract", "enrich", "check_freshness", "resolve_url_redirects"}
 JOB_STATUSES = {"queued", "claimed", "done", "failed", "dead_letter"}
+QUEUE_AGE_BUCKETS = ("lt_24h", "d1_3", "d3_7", "gt_7d")
 URL_OVERRIDE_TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 URL_OVERRIDE_DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
@@ -1554,28 +1555,71 @@ class PostgresRepository:
             json.dumps({"job_id": job_id, "candidate_id": candidate_id, "discovery_id": discovery_id}),
         )
 
-    async def list_candidates(self, limit: int, offset: int, state: str | None) -> list[dict[str, Any]]:
+    async def list_candidates(
+        self,
+        limit: int,
+        offset: int,
+        state: str | None,
+        source: str | None = None,
+        age: str | None = None,
+    ) -> list[dict[str, Any]]:
+        normalized_source = self._coerce_text(source)
+        normalized_age = self._coerce_text(age)
+        if normalized_age and normalized_age not in QUEUE_AGE_BUCKETS:
+            raise RepositoryValidationError("invalid candidate age bucket")
         pool = await self._get_pool()
         rows = await pool.fetch(
             """
+            with discovery_rollup as (
+              select
+                cd.candidate_id,
+                array_agg(distinct cd.discovery_id::text) as discovery_ids
+              from candidate_discoveries cd
+              group by cd.candidate_id
+            ),
+            source_rollup as (
+              select
+                cd.candidate_id,
+                array_agg(
+                  distinct coalesce(
+                    nullif(trim(d.metadata->>'source_key'), ''),
+                    nullif(trim(d.metadata->>'source'), ''),
+                    nullif(trim(m.module_id), ''),
+                    'unknown'
+                  )
+                ) as sources
+              from candidate_discoveries cd
+              join discoveries d on d.id = cd.discovery_id
+              left join modules m on m.id = d.origin_module_id
+              group by cd.candidate_id
+            )
             select
               pc.id::text as id,
               pc.state::text as state,
               pc.dedupe_confidence,
               pc.risk_flags,
               pc.extracted_fields,
-              coalesce(
-                array_agg(distinct cd.discovery_id::text) filter (where cd.discovery_id is not null),
-                '{}'
-              ) as discovery_ids,
+              coalesce(dr.discovery_ids, '{}') as discovery_ids,
               p.id::text as posting_id,
               pc.created_at,
               pc.updated_at
             from posting_candidates pc
-            left join candidate_discoveries cd on cd.candidate_id = pc.id
+            left join discovery_rollup dr on dr.candidate_id = pc.id
+            left join source_rollup sr on sr.candidate_id = pc.id
             left join postings p on p.candidate_id = pc.id
             where ($3::text is null or pc.state::text = $3::text)
-            group by pc.id, p.id
+              and ($4::text is null or $4::text = any(coalesce(sr.sources, array['unknown']::text[])))
+              and (
+                $5::text is null
+                or (
+                  case
+                    when now() - pc.updated_at < interval '24 hours' then 'lt_24h'
+                    when now() - pc.updated_at < interval '72 hours' then 'd1_3'
+                    when now() - pc.updated_at < interval '168 hours' then 'd3_7'
+                    else 'gt_7d'
+                  end
+                ) = $5::text
+              )
             order by pc.updated_at desc
             limit $1
             offset $2
@@ -1583,8 +1627,119 @@ class PostgresRepository:
             limit,
             offset,
             state,
+            normalized_source,
+            normalized_age,
         )
         return [self._candidate_row_to_dict(row) for row in rows]
+
+    async def list_candidate_facets(
+        self,
+        *,
+        state: str | None = None,
+        source: str | None = None,
+        age: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_source = self._coerce_text(source)
+        normalized_age = self._coerce_text(age)
+        if normalized_age and normalized_age not in QUEUE_AGE_BUCKETS:
+            raise RepositoryValidationError("invalid candidate age bucket")
+
+        pool = await self._get_pool()
+        facet_rows = await pool.fetch(
+            """
+            with source_rollup as (
+              select
+                cd.candidate_id,
+                array_agg(
+                  distinct coalesce(
+                    nullif(trim(d.metadata->>'source_key'), ''),
+                    nullif(trim(d.metadata->>'source'), ''),
+                    nullif(trim(m.module_id), ''),
+                    'unknown'
+                  )
+                ) as sources
+              from candidate_discoveries cd
+              join discoveries d on d.id = cd.discovery_id
+              left join modules m on m.id = d.origin_module_id
+              group by cd.candidate_id
+            ),
+            candidate_base as (
+              select
+                pc.id::text as id,
+                pc.state::text as state,
+                coalesce(sr.sources, array['unknown']::text[]) as sources,
+                case
+                  when now() - pc.updated_at < interval '24 hours' then 'lt_24h'
+                  when now() - pc.updated_at < interval '72 hours' then 'd1_3'
+                  when now() - pc.updated_at < interval '168 hours' then 'd3_7'
+                  else 'gt_7d'
+                end as age_bucket
+              from posting_candidates pc
+              left join source_rollup sr on sr.candidate_id = pc.id
+              where ($1::text is null or pc.state::text = $1::text)
+                and ($2::text is null or $2::text = any(coalesce(sr.sources, array['unknown']::text[])))
+                and (
+                  $3::text is null
+                  or (
+                    case
+                      when now() - pc.updated_at < interval '24 hours' then 'lt_24h'
+                      when now() - pc.updated_at < interval '72 hours' then 'd1_3'
+                      when now() - pc.updated_at < interval '168 hours' then 'd3_7'
+                      else 'gt_7d'
+                    end
+                  ) = $3::text
+                )
+            )
+            select facet, value, count
+            from (
+              select
+                'state'::text as facet,
+                state as value,
+                count(*)::int as count
+              from candidate_base
+              group by state
+              union all
+              select
+                'source'::text as facet,
+                source_value as value,
+                count(distinct id)::int as count
+              from candidate_base
+              cross join unnest(sources) as source_value
+              group by source_value
+              union all
+              select
+                'age'::text as facet,
+                age_bucket as value,
+                count(*)::int as count
+              from candidate_base
+              group by age_bucket
+            ) facets
+            order by facet asc, count desc, value asc
+            """,
+            state,
+            normalized_source,
+            normalized_age,
+        )
+
+        states: list[dict[str, Any]] = []
+        sources: list[dict[str, Any]] = []
+        ages: list[dict[str, Any]] = []
+        for row in facet_rows:
+            item = {"value": row["value"], "count": int(row["count"])}
+            facet = row["facet"]
+            if facet == "state":
+                states.append(item)
+            elif facet == "source":
+                sources.append(item)
+            elif facet == "age":
+                ages.append(item)
+
+        return {
+            "total": sum(item["count"] for item in states),
+            "states": states,
+            "sources": sources,
+            "ages": ages,
+        }
 
     async def list_candidate_events(self, *, candidate_id: str, limit: int, offset: int) -> list[dict[str, Any]]:
         pool = await self._get_pool()

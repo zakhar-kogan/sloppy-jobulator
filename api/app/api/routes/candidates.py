@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.security import get_human_principal
 from app.schemas.candidates import (
+    CandidateAgeBucket,
     CandidateEventOut,
+    CandidateFacetsOut,
     CandidateMergeRequest,
     CandidateOverrideRequest,
     CandidateOut,
@@ -26,6 +28,8 @@ async def list_candidates(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     state: CandidateState | None = Query(default=None),
+    source: str | None = Query(default=None, min_length=1, max_length=200),
+    age: CandidateAgeBucket | None = Query(default=None),
 ) -> list[CandidateOut]:
     try:
         principal.require_scopes({"moderation:read"})
@@ -33,11 +37,32 @@ async def list_candidates(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
     try:
-        rows = await repository.list_candidates(limit=limit, offset=offset, state=state)
+        rows = await repository.list_candidates(limit=limit, offset=offset, state=state, source=source, age=age)
     except RepositoryUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
     return [CandidateOut(**row) for row in rows]
+
+
+@router.get("/facets", response_model=CandidateFacetsOut)
+async def list_candidate_facets(
+    principal=Depends(get_human_principal),
+    repository=Depends(get_repository),
+    state: CandidateState | None = Query(default=None),
+    source: str | None = Query(default=None, min_length=1, max_length=200),
+    age: CandidateAgeBucket | None = Query(default=None),
+) -> CandidateFacetsOut:
+    try:
+        principal.require_scopes({"moderation:read"})
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    try:
+        facets = await repository.list_candidate_facets(state=state, source=source, age=age)
+    except RepositoryUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    return CandidateFacetsOut(**facets)
 
 
 @router.patch("/{candidate_id}", response_model=CandidateOut)
