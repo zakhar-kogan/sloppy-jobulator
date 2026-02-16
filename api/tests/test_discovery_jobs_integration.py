@@ -698,7 +698,7 @@ def test_expired_claimed_jobs_are_requeued(api_client: TestClient, database_url:
     assert reclaim_response.json()["status"] == "claimed"
 
 
-def test_failed_results_retry_then_dead_letter(api_client: TestClient, database_url: str) -> None:
+def test_failed_results_retry_then_terminal_failed(api_client: TestClient, database_url: str) -> None:
     discovery_response = api_client.post(
         "/discoveries",
         json={
@@ -720,7 +720,7 @@ def test_failed_results_retry_then_dead_letter(api_client: TestClient, database_
     assert len(jobs) == 1
     job_id = jobs[0]["id"]
 
-    expected_statuses = ["queued", "queued", "dead_letter"]
+    expected_statuses = ["queued", "queued", "failed"]
     for attempt, expected_status in enumerate(expected_statuses, start=1):
         claim_response = api_client.post(
             f"/jobs/{job_id}/claim",
@@ -744,14 +744,14 @@ def test_failed_results_retry_then_dead_letter(api_client: TestClient, database_
         if expected_status == "queued":
             _run(_execute(database_url, "update jobs set next_run_at = now() where id = $1::uuid", job_id))
 
-    dead_letter_count = _run(
+    failed_count = _run(
         _fetchval(
             database_url,
-            "select count(*) from jobs where id = $1::uuid and status = 'dead_letter'",
+            "select count(*) from jobs where id = $1::uuid and status = 'failed'",
             job_id,
         )
     )
-    assert dead_letter_count == 1
+    assert failed_count == 1
 
     retry_event_count = _run(
         _fetchval(
@@ -768,7 +768,7 @@ def test_failed_results_retry_then_dead_letter(api_client: TestClient, database_
     )
     assert retry_event_count == 2
 
-    dead_letter_event_count = _run(
+    result_submitted_failed_count = _run(
         _fetchval(
             database_url,
             """
@@ -776,12 +776,13 @@ def test_failed_results_retry_then_dead_letter(api_client: TestClient, database_
             from provenance_events
             where entity_type = 'job'
               and entity_id = $1::uuid
-              and event_type = 'dead_lettered'
+              and event_type = 'result_submitted'
+              and payload->>'resolved_status' = 'failed'
             """,
             job_id,
         )
     )
-    assert dead_letter_event_count == 1
+    assert result_submitted_failed_count == 1
 
 
 def test_enqueue_freshness_jobs_and_apply_machine_status_transitions(api_client: TestClient, database_url: str) -> None:
@@ -899,7 +900,7 @@ def test_enqueue_freshness_jobs_and_apply_machine_status_transitions(api_client:
     assert machine_status_change_events == 2
 
 
-def test_freshness_dead_letter_downgrades_posting_after_retries(api_client: TestClient, database_url: str) -> None:
+def test_freshness_retry_exhaustion_downgrades_posting_after_retries(api_client: TestClient, database_url: str) -> None:
     candidate_id, posting_id = _run(
         _insert_candidate_and_posting(
             database_url,
@@ -925,7 +926,7 @@ def test_freshness_dead_letter_downgrades_posting_after_retries(api_client: Test
     assert jobs[0]["kind"] == "check_freshness"
     assert jobs[0]["target_id"] == posting_id
 
-    expected_statuses = ["queued", "queued", "dead_letter"]
+    expected_statuses = ["queued", "queued", "failed"]
     for expected_status in expected_statuses:
         claim_response = api_client.post(
             f"/jobs/{job_id}/claim",
@@ -991,7 +992,7 @@ def test_freshness_dead_letter_downgrades_posting_after_retries(api_client: Test
               and entity_id = $1::uuid
               and event_type = 'status_changed'
               and actor_type = 'machine'
-              and payload->>'source' = 'check_freshness_dead_letter'
+              and payload->>'source' = 'check_freshness_retry_exhausted'
             """,
             posting_id,
         )

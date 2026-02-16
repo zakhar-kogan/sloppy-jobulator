@@ -832,7 +832,7 @@ class PostgresRepository:
 
                     if requested_status == "failed":
                         if attempt >= self.job_max_attempts:
-                            resolved_status = "dead_letter"
+                            resolved_status = "failed"
                         else:
                             retry_delay_seconds = self._compute_retry_delay_seconds(attempt=attempt)
                             next_run_at = datetime.now(timezone.utc) + timedelta(seconds=retry_delay_seconds)
@@ -887,7 +887,7 @@ class PostgresRepository:
                                 actor_module_db_id=module_db_id,
                                 result_json=result_json,
                             )
-                        elif row["status"] == "dead_letter":
+                        elif row["status"] == "failed":
                             await self._apply_freshness_dead_letter_fallback(
                                 conn=conn,
                                 job_id=row["id"],
@@ -963,23 +963,6 @@ class PostgresRepository:
                                     "retry_delay_seconds": retry_delay_seconds,
                                 }
                             ),
-                        )
-                    elif requested_status == "failed" and resolved_status == "dead_letter":
-                        await conn.execute(
-                            """
-                            insert into provenance_events (
-                              entity_type,
-                              entity_id,
-                              event_type,
-                              actor_type,
-                              actor_id,
-                              payload
-                            )
-                            values ('job', $1::uuid, 'dead_lettered', 'machine', $2::uuid, $3::jsonb)
-                            """,
-                            row["id"],
-                            module_db_id,
-                            json.dumps({"attempt": attempt, "max_attempts": self.job_max_attempts}),
                         )
                     return self._job_row_to_dict(row)
         except (pg_exc.InvalidTextRepresentationError, asyncpg.DataError) as exc:
@@ -3351,7 +3334,7 @@ class PostgresRepository:
                 to_status=target_status,
                 actor_module_db_id=actor_module_db_id,
                 reason="freshness_retry_exhausted",
-                source="check_freshness_dead_letter",
+                source="check_freshness_retry_exhausted",
                 job_id=job_id,
             )
 
