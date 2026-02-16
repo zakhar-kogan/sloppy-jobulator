@@ -249,7 +249,7 @@ export function ModeratorCockpitClient(): JSX.Element {
   const [jobMessage, setJobMessage] = useState<string | null>(null);
   const [maintenanceLimit, setMaintenanceLimit] = useState(100);
   const [maintenanceConfirmation, setMaintenanceConfirmation] = useState("");
-  const [jobMaintenanceBusy, setJobMaintenanceBusy] = useState<"enqueue" | "reap" | null>(null);
+  const [jobMaintenanceBusy, setJobMaintenanceBusy] = useState<"enqueue" | null>(null);
 
   const candidateQueryString = useMemo(
     () =>
@@ -709,7 +709,7 @@ export function ModeratorCockpitClient(): JSX.Element {
     }
   }
 
-  async function runJobsMaintenance(kind: "enqueue" | "reap"): Promise<void> {
+  async function runJobsMaintenance(kind: "enqueue"): Promise<void> {
     if (maintenanceConfirmation.trim().toUpperCase() !== MAINTENANCE_CONFIRM_TOKEN) {
       setJobError(`Type ${MAINTENANCE_CONFIRM_TOKEN} to confirm maintenance actions.`);
       return;
@@ -719,10 +719,7 @@ export function ModeratorCockpitClient(): JSX.Element {
     setJobError(null);
     setJobMessage(null);
 
-    const path =
-      kind === "enqueue"
-        ? `/api/admin/jobs/enqueue-freshness?${encodeAdminQuery({ limit: maintenanceLimit })}`
-        : `/api/admin/jobs/reap-expired?${encodeAdminQuery({ limit: maintenanceLimit })}`;
+    const path = `/api/admin/jobs/enqueue-freshness?${encodeAdminQuery({ limit: maintenanceLimit })}`;
 
     try {
       const response = await fetch(path, { method: "POST" });
@@ -732,11 +729,7 @@ export function ModeratorCockpitClient(): JSX.Element {
       }
 
       const count = parseAdminCount(payload);
-      setJobMessage(
-        kind === "enqueue"
-          ? `Enqueued ${count} freshness jobs.`
-          : `Requeued ${count} expired claimed jobs.`
-      );
+      setJobMessage(`Enqueued ${count} freshness jobs.`);
       await loadJobs();
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Failed to run jobs maintenance action.";
@@ -1319,17 +1312,6 @@ export function ModeratorCockpitClient(): JSX.Element {
             }
           >
             {jobMaintenanceBusy === "enqueue" ? "Running…" : "Enqueue Freshness"}
-          </button>
-          <button
-            className="button"
-            type="button"
-            onClick={() => void runJobsMaintenance("reap")}
-            disabled={
-              jobMaintenanceBusy !== null ||
-              maintenanceConfirmation.trim().toUpperCase() !== MAINTENANCE_CONFIRM_TOKEN
-            }
-          >
-            {jobMaintenanceBusy === "reap" ? "Running…" : "Reap Expired"}
           </button>
           {jobListLoading ? <p className="status">Loading jobs…</p> : null}
           {jobError ? <p className="status status-error">{jobError}</p> : null}
