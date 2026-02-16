@@ -41,7 +41,7 @@
 | H2 | in_progress | Cockpit now includes bulk candidate patch flow, per-row multi-select controls, transition guardrail messaging, clearer loading/empty/error table states, and redirect/retry diagnostics in jobs table while preserving existing API contracts. |
 | I1 | not_started | TaskRouter abstraction not implemented. |
 | I2 | not_started | LiteLLM adapter not implemented. |
-| J1 | in_progress | OTel baseline is wired for API/workers (FastAPI + asyncpg + httpx spans, worker lifecycle spans, trace/log correlation, OTLP exporter-ready config); metric enrichment and staging sink validation remain pending. |
+| J1 | in_progress | OTel baseline is wired for API/workers (FastAPI + asyncpg + httpx spans, worker lifecycle spans, trace/log correlation, OTLP exporter-ready config); telemetry validation script now uses API health fallback probing plus Cloud Monitoring REST queries (CLI-version resilient), and current staging check shows missing worker backlog series for configured worker service label. |
 | J2 | in_progress | Cloud Operations dashboard + alert policy artifacts are versioned and now have environment-bindable templates/import scripts (`docs/observability/*.template.*`, `scripts/import-observability-assets.sh`); real staging/prod channel + label values still depend on secret bindings. |
 | K1 | not_started | Connector SDK package not implemented. |
 | K2 | not_started | RSS connector not implemented. |
