@@ -3,7 +3,7 @@
 ## Metadata
 - Status: `ACTIVE`
 - Created: `2026-02-12`
-- Last Updated: `2026-02-15`
+- Last Updated: `2026-02-16`
 - Owner: `Codex`
 
 ## Purpose / Big Picture
@@ -30,6 +30,7 @@ Close the current critical backlog by wiring environment-bound staging/prod obse
 - [x] Implement E2 redirect-resolution execution semantics in workers and persistence handling in API repository.
 - [x] Expand H2/L1 Playwright moderation/admin coverage for queue/filter/pagination cross-flow.
 - [x] Run targeted validation matrix and capture continuity notes.
+- [x] Land follow-on E2/H2/L1/public increments with per-step commits and targeted regression checks.
 
 ## Decision Log
 - 2026-02-12: Keep deploy workflow command-driven via environment-bound secrets to avoid hardcoding provider-specific deploy mechanics before infra commands are finalized.
@@ -37,6 +38,8 @@ Close the current critical backlog by wiring environment-bound staging/prod obse
 - 2026-02-12: Added shared URL-normalization override semantics in API and workers (`strip_www`, `force_https`, custom query stripping) to align redirect resolution with eventual E1 per-domain policy support.
 - 2026-02-15: Promote redirect enqueue decisioning to settings-default + per-event metadata override semantics, and pass settings normalization override JSON through redirect job inputs so worker-side normalization stays aligned with E1 policy behavior.
 - 2026-02-15: Expand cockpit L1 breadth with selection-retarget cross-flow tests so moderation mutations track the active filtered row after queue page/filter changes.
+- 2026-02-16: Extended admin `/admin/jobs` payload contract with `inputs_json/result_json/error_json` and explicit redirect `repository_outcome` to make conflict/retry/operator diagnostics visible from cockpit.
+- 2026-02-16: Added cockpit bulk candidate patch UX and selection model; live E2E now includes bulk moderation flow, which exposed pre-existing live spec assumptions around `needs_review` filter density and legacy patch-option expectations.
 
 ## Plan of Work
 1. Environment bindings + staged deploy workflow
@@ -61,6 +64,10 @@ Close the current critical backlog by wiring environment-bound staging/prod obse
 - Expected: expanded mock cockpit coverage passes.
 4. `make lint && make typecheck`
 - Expected: no regressions in static checks.
+5. `make db-up -> make db-reset -> UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "redirect or admin_jobs" -> make db-down`
+- Expected: selected DB-backed redirect/admin job tests pass.
+6. `SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live`
+- Expected: live cockpit suite passes; current run shows remaining failures in older scenarios that assume different queue composition/patch options after H2 changes.
 
 ## Idempotence and Recovery
 1. Observability/deploy scripts are additive and environment-driven; rollback is file-level revert.
@@ -72,3 +79,4 @@ Close the current critical backlog by wiring environment-bound staging/prod obse
 - Follow-ups:
 1. Promote metadata-gated redirect enqueue to default once production behavior and E1 override contract are finalized.
 2. Replace command-driven deploy secret hooks with explicit Cloud Run/Vercel deploy steps when infra commands are confirmed.
+3. Rebaseline/repair live cockpit tests at `web/tests-e2e/admin-cockpit.live.spec.ts` for new bulk-selection behavior and dynamic queue-state assumptions.

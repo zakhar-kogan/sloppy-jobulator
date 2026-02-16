@@ -5,7 +5,7 @@
 - Complexity: `S` (1-2 days), `M` (3-5 days), `L` (1-2 weeks), `XL` (2+ weeks).
 - Order: lower number means earlier on optimal critical path.
 
-## Status Snapshot (2026-02-12)
+## Status Snapshot (2026-02-16)
 
 ### Status legend
 - `done`: implemented and validated in current repo/CI.
@@ -29,7 +29,7 @@
 | D2 | done | Expired-lease requeue endpoint exists and workers trigger it periodically; failed results now follow bounded retry then dead-letter transitions. |
 | D3 | in_progress | Worker runtime dispatches `check_freshness` with periodic scheduler-triggered enqueue; structured logging + OTel baseline instrumentation is now wired, with richer execution semantics still pending. |
 | E1 | in_progress | Base URL normalization/hash logic exists; per-domain override support is pending. |
-| E2 | in_progress | `resolve_url_redirects` worker execution path now resolves redirect chains and can persist resolved discovery URL/hash asynchronously when metadata-gated enqueue is enabled; default ingest routing and full E1 override productization remain pending. |
+| E2 | in_progress | Redirect execution path is now operator-visible in cockpit jobs: admin jobs contract exposes `inputs_json/result_json/error_json`, repository stamps `repository_outcome` (`applied` / `conflict_skipped` / `unchanged`), and cockpit surfaces retry windows + redirect conflict/outcome diagnostics; remaining work is rollout/default tuning and broader live revalidation. |
 | E3 | done | Dedupe scorer v1 now computes deterministic merge confidence from strong/medium/tie-break signals (URL/hash, text similarity, NER/contact-domain overlap). |
 | E4 | done | Merge policy routing now records machine decisions (`auto_merged`/`needs_review`/`rejected`), auto-applies high-confidence merges, and routes uncertain/conflicting matches to moderation with provenance. |
 | F1 | done | Moderation APIs now cover approve/reject (state patch), merge, and override flows with role checks + audit events. |
@@ -37,8 +37,8 @@
 | F3 | done | Posting lifecycle transitions are now explicit via moderated `PATCH /postings/{id}` with transition guards, candidate synchronization, provenance writes, and DB-backed integration coverage. |
 | G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
 | G2 | done | Freshness scheduler endpoint + worker cadence now enqueue `check_freshness` jobs; result/dead-letter paths apply deterministic posting downgrade/archive transitions with provenance and integration coverage. |
-| H1 | in_progress | Minimal Next.js public shell exists; full catalogue UX pending. |
-| H2 | in_progress | Admin trust-policy console is wired to `GET/PUT/PATCH /admin/source-trust-policy`, and `/admin/cockpit` now covers candidate queue actions (`PATCH /candidates`, `POST /candidates/{id}/merge`, `POST /candidates/{id}/override`) plus modules/jobs operator flows (`GET/PATCH /admin/modules`, `GET /admin/jobs`, `POST /admin/jobs/reap-expired`, `POST /admin/jobs/enqueue-freshness`) via Next.js proxy routes; UX hardening remains pending. |
+| H1 | in_progress | Public surface advanced from scaffold to API-backed catalogue/search UX on `/` with filters, sort, pagination, and detail preview via new public proxy routes (`/api/postings`, `/api/postings/{id}`); additional relevance tuning and visual polish remain. |
+| H2 | in_progress | Cockpit now includes bulk candidate patch flow, per-row multi-select controls, transition guardrail messaging, clearer loading/empty/error table states, and redirect/retry diagnostics in jobs table while preserving existing API contracts. |
 | I1 | not_started | TaskRouter abstraction not implemented. |
 | I2 | not_started | LiteLLM adapter not implemented. |
 | J1 | in_progress | OTel baseline is wired for API/workers (FastAPI + asyncpg + httpx spans, worker lifecycle spans, trace/log correlation, OTLP exporter-ready config); metric enrichment and staging sink validation remain pending. |
@@ -48,7 +48,7 @@
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Integration tests cover discovery/jobs/postings list+detail+filters, projection path, lease requeue, retry/dead-letter, freshness enqueue/dead-letter downgrade flow, moderation authz/state/merge/override, posting lifecycle patch transitions, and admin modules/jobs contract endpoints; web API-contract tests cover cockpit query/proxy path mapping plus admin proxy failure mapping (`4xx/5xx` passthrough, `limit` bounds pass-through, non-JSON backend `{detail}` shaping); Playwright covers both mocked cockpit UI contracts and live backend-driven cockpit flows (happy path, merge-conflict rendering, backend `401`/`403`/`422` negatives, plus persistence assertions for candidate events/module mutations/job enqueue-reap transitions); `web-e2e-live` CI runtime uses cache-backed dependencies/browsers with explicit timeout budgets and scoped retry. |
+| L1 | in_progress | Added live E2E coverage for bulk moderation path and expanded mocked cockpit specs for redirect/retry operator diagnostics; DB-backed targeted API redirect/admin job tests pass, while several older live cockpit scenarios now need rebaselining to updated queue/patch-option assumptions. |
 | L2 | not_started | Load/perf testing not implemented. |
 | M1 | in_progress | Quality CI is split into fast and DB-backed integration checks with explicit `migration-safety` + `deploy-readiness-gate`, and a staged `deploy.yml` workflow now binds env-specific secrets/commands; first live staging/prod executions remain pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
@@ -59,9 +59,9 @@
 - Validate OTLP sink + telemetry quality in staging (`J1`).
 - Bind dashboard/alert policies to production metric labels and notification channels (`J2`).
 - Add environment-specific deploy execution workflow behind existing `deploy-readiness-gate` (`M1`).
-2. Continue `H2` cockpit hardening around operator ergonomics and guardrails while preserving existing API contracts.
-3. Keep full moderation/admin E2E under `L1` as the primary remaining coverage gap.
-4. Start `E2` redirect-resolution async job path (`resolve_url_redirects`) to close the remaining Phase-2 P0 gap.
+2. Rebaseline failing legacy live cockpit scenarios (`web/tests-e2e/admin-cockpit.live.spec.ts`) against the current H2 queue-selection behavior and dynamic candidate-state composition.
+3. Continue `H2` cockpit hardening around operator ergonomics (bulk action observability, faster triage loops) while preserving existing API contracts.
+4. Keep `L1` focused on stabilizing full live moderation/admin E2E after the new bulk/redirect visibility paths.
 
 ## Workstreams and Task Graph
 
