@@ -2344,6 +2344,20 @@ def test_admin_jobs_rejects_dead_letter_filter(
     assert response.status_code == 422
 
 
+def test_admin_jobs_rejects_deprecated_kind_filter(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001022")
+
+    response = api_client.get(
+        "/admin/jobs",
+        params={"kind": "dedupe"},
+        headers={"Authorization": "Bearer admin-token"},
+    )
+    assert response.status_code == 422
+
+
 def test_dedupe_policy_auto_merges_high_confidence_duplicate_candidate(
     api_client: TestClient,
     database_url: str,

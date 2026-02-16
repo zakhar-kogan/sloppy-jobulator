@@ -37,7 +37,7 @@ const CANDIDATE_STATES: CandidateState[] = [
   "needs_review"
 ];
 const MODULE_KINDS: ModuleKind[] = ["connector", "processor"];
-const JOB_KINDS: JobKind[] = ["dedupe", "extract", "enrich", "check_freshness", "resolve_url_redirects"];
+const JOB_KINDS: JobKind[] = ["extract", "check_freshness", "resolve_url_redirects"];
 const JOB_STATUSES: JobStatus[] = ["queued", "claimed", "done", "failed"];
 const POSTING_STATUSES: PostingStatus[] = ["active", "stale", "archived", "closed"];
 const CANDIDATE_LIMIT_MAX = 100;
