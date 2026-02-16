@@ -80,11 +80,12 @@ async function createDiscovery(
   options?: {
     url?: string;
     metadata?: Record<string, unknown>;
+    headers?: Record<string, string>;
   },
 ): Promise<DiscoveryAccepted> {
   const discoveredAt = new Date().toISOString();
   const discoveryResp = await request.post(`${API_BASE_URL}/discoveries`, {
-    headers: CONNECTOR_HEADERS,
+    headers: options?.headers ?? CONNECTOR_HEADERS,
     data: {
       origin_module_id: "local-connector",
       external_id: externalId,
@@ -105,8 +106,17 @@ async function createDiscoveryAndProcess(
   canonicalSlug: string,
   title: string,
   includePosting: boolean,
+  options?: {
+    dedupeConfidence?: number;
+    riskFlags?: string[];
+    discoveryMetadata?: Record<string, unknown>;
+    connectorHeaders?: Record<string, string>;
+  },
 ): Promise<{ discoveryId: string; candidateHash: string }> {
-  const discovery = await createDiscovery(request, externalId, canonicalSlug, title);
+  const discovery = await createDiscovery(request, externalId, canonicalSlug, title, {
+    metadata: options?.discoveryMetadata,
+    headers: options?.connectorHeaders,
+  });
 
   const jobsResp = await request.get(`${API_BASE_URL}/jobs`, { headers: PROCESSOR_HEADERS });
   expect(jobsResp.ok()).toBeTruthy();
@@ -128,10 +138,12 @@ async function createDiscoveryAndProcess(
     data: {
       status: "done",
       result_json: {
-        dedupe_confidence: 0.91,
-        risk_flags: includePosting
-          ? ["manual_review_needed"]
-          : ["manual_review_needed", "manual_review_low_signal"],
+        dedupe_confidence: options?.dedupeConfidence ?? 0.91,
+        risk_flags:
+          options?.riskFlags ??
+          (includePosting
+            ? ["manual_review_needed"]
+            : ["manual_review_needed", "manual_review_low_signal"]),
         posting: includePosting
           ? {
               title,
@@ -241,6 +253,7 @@ test("cockpit live flow persists merge, moderation, module toggles, and posting 
     `live-primary-${suffix}`,
     `Live Primary Candidate ${suffix}`,
     true,
+    { dedupeConfidence: 0.55 },
   );
   const secondary = await createDiscoveryAndProcess(
     request,
@@ -425,6 +438,7 @@ test("cockpit live merge conflict path surfaces backend detail", async ({ page, 
     `live-conflict-primary-${suffix}`,
     `Live Conflict Primary ${suffix}`,
     true,
+    { dedupeConfidence: 0.55 },
   );
   const secondary = await createDiscoveryAndProcess(
     request,
@@ -432,6 +446,7 @@ test("cockpit live merge conflict path surfaces backend detail", async ({ page, 
     `live-conflict-secondary-${suffix}`,
     `Live Conflict Secondary ${suffix}`,
     true,
+    { dedupeConfidence: 0.55 },
   );
 
   const primaryCandidate = await findCandidateByDiscovery(request, primary.discoveryId);
@@ -476,6 +491,7 @@ test("cockpit live applies operator guardrails for patch transitions and reasone
     `live-guardrail-primary-${suffix}`,
     `Live Guardrail Primary ${suffix}`,
     true,
+    { dedupeConfidence: 0.55 },
   );
   const secondary = await createDiscoveryAndProcess(
     request,
@@ -610,21 +626,24 @@ test("cockpit live queue pagination drives patch action against selected candida
     `live-pagination-a-${suffix}`,
     `live-pagination-a-${suffix}`,
     `Live Pagination A ${suffix}`,
-    false,
+    true,
+    { dedupeConfidence: 0.55 },
   );
   await createDiscoveryAndProcess(
     request,
     `live-pagination-b-${suffix}`,
     `live-pagination-b-${suffix}`,
     `Live Pagination B ${suffix}`,
-    false,
+    true,
+    { dedupeConfidence: 0.55 },
   );
   await createDiscoveryAndProcess(
     request,
     `live-pagination-c-${suffix}`,
     `live-pagination-c-${suffix}`,
     `Live Pagination C ${suffix}`,
-    false,
+    true,
+    { dedupeConfidence: 0.55 },
   );
 
   await page.goto("/admin/cockpit");
@@ -666,21 +685,24 @@ test("cockpit live retargets selected candidate after filter-page changes before
     `live-retarget-a-${suffix}`,
     `live-retarget-a-${suffix}`,
     `Live Retarget A ${suffix}`,
-    false,
+    true,
+    { dedupeConfidence: 0.55 },
   );
   const second = await createDiscoveryAndProcess(
     request,
     `live-retarget-b-${suffix}`,
     `live-retarget-b-${suffix}`,
     `Live Retarget B ${suffix}`,
-    false,
+    true,
+    { dedupeConfidence: 0.55 },
   );
   const third = await createDiscoveryAndProcess(
     request,
     `live-retarget-c-${suffix}`,
     `live-retarget-c-${suffix}`,
     `Live Retarget C ${suffix}`,
-    false,
+    true,
+    { dedupeConfidence: 0.55 },
   );
 
   const thirdCandidate = await findCandidateByDiscovery(request, third.discoveryId);
@@ -701,6 +723,10 @@ test("cockpit live retargets selected candidate after filter-page changes before
 
   const expectedNeedsReviewPage = await listCandidates(request, "state=needs_review&limit=1&offset=1");
   expect(expectedNeedsReviewPage.length).toBe(1);
+  const candidateTable = page.locator("article:has(h2:text-is('Candidate Queue'))");
+  const selectedRow = candidateTable.locator("tbody tr").filter({ hasText: expectedNeedsReviewPage[0].id });
+  await expect(selectedRow).toHaveCount(1);
+  await selectedRow.getByRole("button", { name: /Select|Selected/ }).click();
   const selectedActions = page.locator("article:has(h2:text-is('Selected Candidate Actions'))");
   await expect(selectedActions).toContainText(expectedNeedsReviewPage[0].id);
 

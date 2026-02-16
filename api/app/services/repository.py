@@ -4202,12 +4202,21 @@ class PostgresRepository:
                 matched_fallback=False,
             )
 
+        default_auto_publish = normalized_trust_level in {"trusted", "semi_trusted"}
+        default_requires_moderation = normalized_trust_level != "trusted"
+        default_rules_json: dict[str, Any] = {}
+        if normalized_trust_level in {"trusted", "semi_trusted"}:
+            default_rules_json["min_confidence"] = 0.72
+        if normalized_trust_level == "semi_trusted":
+            # Semi-trusted sources may auto-publish when no conflict signals are present.
+            default_rules_json["allow_if_no_conflicts"] = True
+
         return SourceTrustPolicyRecord(
             source_key=f"default:{normalized_trust_level}",
             trust_level=normalized_trust_level,
-            auto_publish=normalized_trust_level == "trusted",
-            requires_moderation=normalized_trust_level != "trusted",
-            rules_json={},
+            auto_publish=default_auto_publish,
+            requires_moderation=default_requires_moderation,
+            rules_json=default_rules_json,
             matched_fallback=True,
         )
 

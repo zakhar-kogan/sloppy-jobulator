@@ -14,12 +14,13 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API/worker runtime, observability baseline, and deploy/migration safety gates.
-Now: E2/H2/L1/public increments landed in sequence with committed cockpit redirect visibility, bulk moderation UX hardening, expanded live cockpit E2E for bulk path, and an API-backed public catalogue/search surface.
-Next: Stabilize existing live cockpit E2E assumptions after cockpit bulk-state defaults changed, then continue staging telemetry bind/validation (`J1/J2/M1`) and broader full-suite regression.
+Now: E2/H2/public increments plus F2 trust-policy fallback hardening and L1 live cockpit rebaseline are validated; DB-backed trust/postings slices and full live cockpit suite are green.
+Next: Execute staging/prod environment binding and validation for `J1/J2/M1`, then close residual `G1/H1` relevance and catalogue UX polish items.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
 - 2026-02-16 `[CODE]` Completed ordered product increment set with four commits: `013f8d2` (E2 cockpit redirect visibility), `53d8506` (H2 bulk/operator UX hardening), `7716ae3` (L1 live bulk moderation E2E), `acb8369` (public API-backed catalogue/search UX).
+- 2026-02-16 `[CODE]` Closed trust-policy fallback and live cockpit rebaseline gaps: trusted/semi-trusted fallback defaults now enforce confidence-aware auto-publish behavior, and live cockpit E2E fixtures explicitly seed/select deterministic queue states.
 - 2026-02-15 `[CODE]` Completed E1 persisted URL normalization overrides: added `url_normalization_overrides` DB table/trigger, admin CRUD+toggle API (`/admin/url-normalization-overrides`), repository validation/audit events, and shared persisted override hydration for ingest + redirect claim path.
 - 2026-02-15 `[CODE]` Updated E2 discovery enqueue semantics to use `SJ_ENABLE_REDIRECT_RESOLUTION_JOBS` defaults with per-event metadata override (`resolve_redirects`), propagated normalization overrides into `resolve_url_redirects` job inputs, and expanded cockpit E2E retargeting cross-flow coverage.
 - 2026-02-15 `[CODE]` Stabilized live cockpit merge-conflict E2E assertion to accept backend conflict detail or equivalent self-merge guardrail text while preserving no-merge event verification.
@@ -38,6 +39,7 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 ## Receipts
 - 2026-02-16 `[TOOL]` `make db-up -> make db-reset -> (escalated) UV_CACHE_DIR=/tmp/uv-cache SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k "redirect or admin_jobs" -> make db-down` passed (`6/6` selected DB-backed API tests).
 - 2026-02-16 `[TOOL]` `SJ_DATABASE_URL=... DATABASE_URL=... fnm exec --using 24.13.0 pnpm --dir web test:e2e:live` failed (`3/8` pass): failures are in pre-existing live cockpit scenarios that assume `needs_review` candidates on filtered pages and old patch-option expectations (`closed` absent).
+- 2026-02-16 `[TOOL]` `make db-up -> make db-reset -> (escalated) SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k trust_policy -> (escalated) ... -k postings -> (escalated) fnm exec --using 24.13.0 pnpm --dir web exec playwright test -c playwright.live.config.ts web/tests-e2e/admin-cockpit.live.spec.ts --reporter=line` passed (`16/16` trust-policy slice, `4/4` postings slice, `8/8` live cockpit).
 - 2026-02-12 `[TOOL]` `uv run --project workers --extra dev pytest workers/tests/test_redirects.py workers/tests/test_freshness.py` passed (`7/7`).
 - 2026-02-12 `[TOOL]` `uv run --project api --extra dev pytest api/tests/test_urls.py -q` passed (`2/2`).
 - 2026-02-12 `[TOOL]` `fnm exec --using 24.13.0 pnpm --dir web exec playwright test web/tests-e2e/admin-cockpit.spec.ts --reporter=line` passed (`6/6`).

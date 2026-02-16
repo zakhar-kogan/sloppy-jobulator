@@ -33,7 +33,7 @@
 | E3 | done | Dedupe scorer v1 now computes deterministic merge confidence from strong/medium/tie-break signals (URL/hash, text similarity, NER/contact-domain overlap). |
 | E4 | done | Merge policy routing now records machine decisions (`auto_merged`/`needs_review`/`rejected`), auto-applies high-confidence merges, and routes uncertain/conflicting matches to moderation with provenance. |
 | F1 | done | Moderation APIs now cover approve/reject (state patch), merge, and override flows with role checks + audit events. |
-| F2 | in_progress | `source_trust_policy` routing now drives trusted/semi/untrusted publication paths and merge-outcome actions (`needs_review`/`rejected`/`auto_merged`) with source-specific moderation-route receipts; repository write-path validation strictly enforces allowed merge actions, route-label format, and unknown-key rejection; admin policy endpoints (`GET/PUT/PATCH /admin/source-trust-policy`) plus provenance audit events (`policy_upserted`, `policy_enabled_changed`), integration contract tests, and API-oriented runbook guidance are implemented. |
+| F2 | done | `source_trust_policy` routing now drives trusted/semi/untrusted publication paths and merge-outcome actions (`needs_review`/`rejected`/`auto_merged`) with source-specific moderation-route receipts; repository write-path validation strictly enforces allowed merge actions, route-label format, and unknown-key rejection; admin policy endpoints (`GET/PUT/PATCH /admin/source-trust-policy`) plus provenance audit events (`policy_upserted`, `policy_enabled_changed`) are implemented, with fallback policy defaults aligned to confidence-based trusted/semi-trusted behavior and DB-backed integration coverage passing. |
 | F3 | done | Posting lifecycle transitions are now explicit via moderated `PATCH /postings/{id}` with transition guards, candidate synchronization, provenance writes, and DB-backed integration coverage. |
 | G1 | in_progress | `GET /postings` now supports detail/filter/sort/search/pagination with contract tests; additional relevance/edge-case query semantics remain to harden. |
 | G2 | done | Freshness scheduler endpoint + worker cadence now enqueue `check_freshness` jobs; result/dead-letter paths apply deterministic posting downgrade/archive transitions with provenance and integration coverage. |
@@ -48,7 +48,7 @@
 | K3 | not_started | Telegram connector not implemented. |
 | K4 | not_started | Apify connector not implemented. |
 | K5 | not_started | Social connectors not implemented. |
-| L1 | in_progress | Added live E2E coverage for bulk moderation path and expanded mocked cockpit specs for redirect/retry operator diagnostics; DB-backed targeted API redirect/admin job tests pass, while several older live cockpit scenarios now need rebaselining to updated queue/patch-option assumptions. |
+| L1 | done | Live E2E coverage now spans bulk moderation and legacy cockpit flows with deterministic queue-selection fixtures aligned to current candidate-state transitions; DB-backed targeted API redirect/admin/trust/postings integration slices and full live cockpit suite pass. |
 | L2 | not_started | Load/perf testing not implemented. |
 | M1 | in_progress | Quality CI is split into fast and DB-backed integration checks with explicit `migration-safety` + `deploy-readiness-gate`, and a staged `deploy.yml` workflow now binds env-specific secrets/commands; first live staging/prod executions remain pending. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
@@ -59,9 +59,8 @@
 - Validate OTLP sink + telemetry quality in staging (`J1`).
 - Bind dashboard/alert policies to production metric labels and notification channels (`J2`).
 - Add environment-specific deploy execution workflow behind existing `deploy-readiness-gate` (`M1`).
-2. Rebaseline failing legacy live cockpit scenarios (`web/tests-e2e/admin-cockpit.live.spec.ts`) against the current H2 queue-selection behavior and dynamic candidate-state composition.
-3. Continue `H2` cockpit hardening around operator ergonomics (bulk action observability, faster triage loops) while preserving existing API contracts.
-4. Keep `L1` focused on stabilizing full live moderation/admin E2E after the new bulk/redirect visibility paths.
+2. Continue `H2` cockpit hardening around operator ergonomics (bulk action observability, faster triage loops) while preserving existing API contracts.
+3. Keep `G1/H1` focused on relevance/edge-case query semantics and catalogue UX polish against current API contracts.
 
 ## Workstreams and Task Graph
 
