@@ -39,7 +39,7 @@ async def run_worker() -> None:
             try:
                 with tracer.start_as_current_span("worker.poll_cycle"):
                     now = time.monotonic()
-                    if now - last_reap_at >= settings.lease_reaper_interval_seconds:
+                    if settings.enable_lease_reaper and now - last_reap_at >= settings.lease_reaper_interval_seconds:
                         requeued = await client.reap_expired_jobs(limit=settings.lease_reaper_batch_size)
                         if requeued:
                             logger.info("requeued expired leases: %s", requeued)

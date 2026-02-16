@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     poll_interval_seconds: float = 2.0
     max_backoff_seconds: float = 15.0
     claim_lease_seconds: int = 120
+    enable_lease_reaper: bool = False
     lease_reaper_interval_seconds: float = 15.0
     lease_reaper_batch_size: int = 100
     freshness_enqueue_interval_seconds: float = 300.0
