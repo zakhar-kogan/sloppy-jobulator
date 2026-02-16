@@ -2373,6 +2373,63 @@ def test_admin_jobs_rejects_deprecated_kind_filter(
     assert response.status_code == 422
 
 
+def test_admin_jobs_default_listing_excludes_deprecated_kinds(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001023")
+    discovery_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-admin-jobs-kind-visibility",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "https://example.edu/jobs/admin-jobs-kind-visibility",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert discovery_response.status_code == 202
+    discovery_id = discovery_response.json()["discovery_id"]
+
+    _run(
+        _execute(
+            database_url,
+            """
+            insert into jobs (
+              kind,
+              target_type,
+              target_id,
+              status,
+              attempt,
+              next_run_at,
+              inputs_json
+            )
+            values (
+              'dedupe',
+              'discovery',
+              $1::uuid,
+              'queued',
+              0,
+              now(),
+              jsonb_build_object('reason', 'deprecated-kind-fixture')
+            )
+            """,
+            discovery_id,
+        )
+    )
+
+    response = api_client.get(
+        "/admin/jobs",
+        headers={"Authorization": "Bearer admin-token"},
+    )
+    assert response.status_code == 200
+    jobs = response.json()
+    assert len(jobs) >= 1
+    assert all(job["kind"] != "dedupe" for job in jobs)
+
+
 def test_dedupe_policy_auto_merges_high_confidence_duplicate_candidate(
     api_client: TestClient,
     database_url: str,

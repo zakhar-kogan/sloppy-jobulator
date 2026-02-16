@@ -72,6 +72,7 @@ JOB_KINDS = {"dedupe", "extract", "enrich", "check_freshness", "resolve_url_redi
 JOB_STATUSES = {"queued", "claimed", "done", "failed", "dead_letter"}
 ADMIN_JOB_FILTER_STATUSES = {"queued", "claimed", "done", "failed"}
 ADMIN_JOB_FILTER_KINDS = {"extract", "check_freshness", "resolve_url_redirects"}
+ADMIN_JOB_VISIBLE_KINDS = ("extract", "check_freshness", "resolve_url_redirects")
 QUEUE_AGE_BUCKETS = ("lt_24h", "d1_3", "d3_7", "gt_7d")
 URL_OVERRIDE_TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 URL_OVERRIDE_DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -2927,6 +2928,7 @@ class PostgresRepository:
             where ($1::text is null or status::text = $1)
               and ($2::text is null or kind::text = $2)
               and ($3::text is null or target_type = $3)
+              and kind::text = any($6::text[])
             order by updated_at desc, id desc
             limit $4
             offset $5
@@ -2936,6 +2938,7 @@ class PostgresRepository:
             normalized_target_type,
             limit,
             offset,
+            list(ADMIN_JOB_VISIBLE_KINDS),
         )
         return [self._admin_job_row_to_dict(row) for row in rows]
 
