@@ -162,9 +162,12 @@ export function ModeratorCockpitClient(): JSX.Element {
   const [candidateListLoading, setCandidateListLoading] = useState(false);
   const [candidateListError, setCandidateListError] = useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>("");
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
 
   const [patchState, setPatchState] = useState<CandidateState>("publishable");
   const [patchReason, setPatchReason] = useState("");
+  const [bulkPatchState, setBulkPatchState] = useState<CandidateState>("publishable");
+  const [bulkPatchReason, setBulkPatchReason] = useState("");
   const [mergeSecondaryCandidateId, setMergeSecondaryCandidateId] = useState("");
   const [mergeReason, setMergeReason] = useState("");
   const [overrideState, setOverrideState] = useState<CandidateState>("publishable");
@@ -173,6 +176,9 @@ export function ModeratorCockpitClient(): JSX.Element {
   const [candidateActionBusy, setCandidateActionBusy] = useState<CandidateAction | null>(null);
   const [candidateMessage, setCandidateMessage] = useState<string | null>(null);
   const [candidateActionError, setCandidateActionError] = useState<string | null>(null);
+  const [bulkActionBusy, setBulkActionBusy] = useState(false);
+  const [bulkActionMessage, setBulkActionMessage] = useState<string | null>(null);
+  const [bulkActionError, setBulkActionError] = useState<string | null>(null);
 
   const [moduleIdFilter, setModuleIdFilter] = useState("");
   const [moduleKindFilter, setModuleKindFilter] = useState<ModuleKindFilter>("all");
@@ -236,6 +242,17 @@ export function ModeratorCockpitClient(): JSX.Element {
     () => candidates.find((candidate) => candidate.id === selectedCandidateId) ?? null,
     [candidates, selectedCandidateId]
   );
+  const selectedCandidateRows = useMemo(
+    () => candidates.filter((candidate) => selectedCandidateIds.includes(candidate.id)),
+    [candidates, selectedCandidateIds]
+  );
+  const bulkTransitionBlockedCandidates = useMemo(
+    () =>
+      selectedCandidateRows
+        .filter((candidate) => !canTransitionCandidateState(candidate.state, bulkPatchState))
+        .map((candidate) => candidate.id),
+    [bulkPatchState, selectedCandidateRows]
+  );
   const patchStateOptions = useMemo(
     () => listPatchCandidateStates(selectedCandidate?.state ?? null, CANDIDATE_STATES),
     [selectedCandidate]
@@ -253,6 +270,11 @@ export function ModeratorCockpitClient(): JSX.Element {
     mergeReason.trim().length === 0;
   const overrideSubmitDisabled =
     candidateActionBusy !== null || !selectedCandidateId || overrideReason.trim().length === 0;
+  const bulkSubmitDisabled =
+    bulkActionBusy ||
+    selectedCandidateRows.length === 0 ||
+    (requiresPatchReason(bulkPatchState) && bulkPatchReason.trim().length === 0) ||
+    bulkTransitionBlockedCandidates.length > 0;
 
   const loadCandidates = useCallback(async () => {
     setCandidateListLoading(true);
@@ -278,11 +300,13 @@ export function ModeratorCockpitClient(): JSX.Element {
       } else if (!rows.some((candidate) => candidate.id === selectedCandidateId)) {
         setSelectedCandidateId(rows[0].id);
       }
+      setSelectedCandidateIds((previousIds) => previousIds.filter((candidateId) => rows.some((row) => row.id === candidateId)));
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Failed to load candidates.";
       setCandidateListError(detail);
       setCandidates([]);
       setSelectedCandidateId("");
+      setSelectedCandidateIds([]);
     } finally {
       setCandidateListLoading(false);
     }
@@ -360,6 +384,28 @@ export function ModeratorCockpitClient(): JSX.Element {
     }
   }, [patchState, patchStateOptions]);
 
+  function handleCandidateQuickSelect(candidateId: string): void {
+    setSelectedCandidateId(candidateId);
+    setSelectedCandidateIds((previousIds) => (previousIds.includes(candidateId) ? previousIds : [...previousIds, candidateId]));
+  }
+
+  function handleCandidateCheckboxToggle(candidateId: string, checked: boolean): void {
+    setSelectedCandidateIds((previousIds) => {
+      if (checked) {
+        return previousIds.includes(candidateId) ? previousIds : [...previousIds, candidateId];
+      }
+      return previousIds.filter((value) => value !== candidateId);
+    });
+  }
+
+  function handleSelectAllCandidatesOnPage(): void {
+    setSelectedCandidateIds(candidates.map((candidate) => candidate.id));
+  }
+
+  function handleClearCandidateSelection(): void {
+    setSelectedCandidateIds([]);
+  }
+
   async function runCandidateAction(action: CandidateAction, body: Record<string, unknown>): Promise<void> {
     if (!selectedCandidateId) {
       setCandidateActionError("Select a candidate first.");
@@ -406,6 +452,18 @@ export function ModeratorCockpitClient(): JSX.Element {
       setCandidateActionError(detail);
     } finally {
       setCandidateActionBusy(null);
+    }
+  }
+
+  async function patchCandidateById(candidateId: string, body: Record<string, unknown>): Promise<void> {
+    const response = await fetch(`/api/admin/candidates/${encodeURIComponent(candidateId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok) {
+      throw new Error(getApiErrorDetail(payload, `Failed to patch candidate ${candidateId}.`));
     }
   }
 
@@ -468,6 +526,56 @@ export function ModeratorCockpitClient(): JSX.Element {
       reason,
       posting_status: overridePostingStatus || undefined
     });
+  }
+
+  async function handleBulkPatch(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const reason = bulkPatchReason.trim();
+    if (requiresPatchReason(bulkPatchState) && !reason) {
+      setBulkActionError(`reason is required when bulk patching candidates to ${bulkPatchState}.`);
+      return;
+    }
+    if (selectedCandidateRows.length === 0) {
+      setBulkActionError("Select at least one candidate for bulk actions.");
+      return;
+    }
+    if (bulkTransitionBlockedCandidates.length > 0) {
+      setBulkActionError(
+        `Cannot bulk patch due to invalid transitions for: ${bulkTransitionBlockedCandidates.slice(0, 4).join(", ")}${bulkTransitionBlockedCandidates.length > 4 ? ", ..." : ""}`
+      );
+      return;
+    }
+
+    setBulkActionBusy(true);
+    setBulkActionError(null);
+    setBulkActionMessage(null);
+    let successCount = 0;
+    const failures: string[] = [];
+
+    for (const candidate of selectedCandidateRows) {
+      try {
+        await patchCandidateById(candidate.id, {
+          state: bulkPatchState,
+          reason: reason || undefined
+        });
+        successCount += 1;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : `Failed to patch candidate ${candidate.id}.`;
+        failures.push(`${candidate.id}: ${detail}`);
+      }
+    }
+
+    if (failures.length === 0) {
+      setBulkActionMessage(`Bulk patched ${successCount} candidate(s) to ${bulkPatchState}.`);
+      setBulkPatchReason("");
+    } else {
+      setBulkActionError(
+        `Bulk patch completed with ${successCount} success(es) and ${failures.length} failure(s): ${failures.slice(0, 2).join(" | ")}`
+      );
+    }
+
+    await loadCandidates();
+    setBulkActionBusy(false);
   }
 
   async function handleModuleToggle(module: AdminModule): Promise<void> {
@@ -587,10 +695,21 @@ export function ModeratorCockpitClient(): JSX.Element {
           <button className="button button-primary" type="button" onClick={() => void loadCandidates()}>
             Refresh Candidates
           </button>
+          <button className="button" type="button" onClick={handleSelectAllCandidatesOnPage} disabled={candidates.length === 0}>
+            Select All On Page
+          </button>
+          <button className="button" type="button" onClick={handleClearCandidateSelection} disabled={selectedCandidateIds.length === 0}>
+            Clear Selection
+          </button>
+          <p className="status">
+            Selected <strong>{selectedCandidateIds.length}</strong> of {candidates.length} candidate(s) on this page.
+          </p>
           {candidateListLoading ? <p className="status">Loading candidates…</p> : null}
           {candidateListError ? <p className="status status-error">{candidateListError}</p> : null}
           {candidateMessage ? <p className="status status-ok">{candidateMessage}</p> : null}
           {candidateActionError ? <p className="status status-error">{candidateActionError}</p> : null}
+          {bulkActionMessage ? <p className="status status-ok">{bulkActionMessage}</p> : null}
+          {bulkActionError ? <p className="status status-error">{bulkActionError}</p> : null}
         </div>
       </article>
 
@@ -707,6 +826,43 @@ export function ModeratorCockpitClient(): JSX.Element {
             {candidateActionBusy === "override" ? "Overriding…" : "Apply Override"}
           </button>
         </form>
+
+        <form className="stack" onSubmit={(event) => void handleBulkPatch(event)}>
+          <h3 className="small-heading">Bulk Patch</h3>
+          <p className="status">
+            Apply one state transition across selected candidates in the queue table.
+          </p>
+          <label className="control">
+            <span>State</span>
+            <select value={bulkPatchState} onChange={(event) => setBulkPatchState(event.target.value as CandidateState)}>
+              {CANDIDATE_STATES.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="control">
+            <span>Reason</span>
+            <input
+              value={bulkPatchReason}
+              onChange={(event) => setBulkPatchReason(event.target.value)}
+              placeholder={requiresPatchReason(bulkPatchState) ? "Required for rejected/archived/closed" : "Optional bulk reason"}
+            />
+          </label>
+          <p className="status">
+            Transition-ready: {selectedCandidateRows.length - bulkTransitionBlockedCandidates.length} / {selectedCandidateRows.length}
+          </p>
+          {bulkTransitionBlockedCandidates.length > 0 ? (
+            <p className="status status-error">
+              Invalid transitions for selected candidates: {bulkTransitionBlockedCandidates.slice(0, 3).join(", ")}
+              {bulkTransitionBlockedCandidates.length > 3 ? ", ..." : ""}.
+            </p>
+          ) : null}
+          <button className="button" type="submit" disabled={bulkSubmitDisabled}>
+            {bulkActionBusy ? "Applying Bulk Patch…" : "Apply Bulk Patch"}
+          </button>
+        </form>
       </article>
 
       <article className="panel panel-wide">
@@ -715,6 +871,7 @@ export function ModeratorCockpitClient(): JSX.Element {
           <table className="policy-table">
             <thead>
               <tr>
+                <th>Select</th>
                 <th>Candidate</th>
                 <th>State</th>
                 <th>Dedupe</th>
@@ -724,34 +881,51 @@ export function ModeratorCockpitClient(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {candidates.map((candidate) => (
-                <tr key={candidate.id}>
-                  <td>
-                    <div>
-                      <strong>{coerceTitle(candidate.extracted_fields)}</strong>
-                    </div>
-                    <code>{candidate.id}</code>
-                  </td>
-                  <td>{candidate.state}</td>
-                  <td>{candidate.dedupe_confidence ?? "-"}</td>
-                  <td>{candidate.risk_flags.length > 0 ? candidate.risk_flags.join(", ") : "-"}</td>
-                  <td>{formatTimestamp(candidate.updated_at)}</td>
-                  <td>
-                    <button
-                      className="button button-ghost"
-                      type="button"
-                      onClick={() => setSelectedCandidateId(candidate.id)}
-                    >
-                      {selectedCandidateId === candidate.id ? "Selected" : "Select"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {candidates.length === 0 ? (
+              {candidateListLoading ? (
                 <tr>
-                  <td colSpan={6}>No candidates found for current filters.</td>
+                  <td colSpan={7}>Loading candidate queue…</td>
                 </tr>
-              ) : null}
+              ) : candidateListError ? (
+                <tr>
+                  <td colSpan={7}>Unable to load candidate queue: {candidateListError}</td>
+                </tr>
+              ) : candidates.length === 0 ? (
+                <tr>
+                  <td colSpan={7}>No candidates found for current filters. Adjust state/offset or refresh.</td>
+                </tr>
+              ) : (
+                candidates.map((candidate) => (
+                  <tr key={candidate.id}>
+                    <td>
+                      <input
+                        aria-label={`Select candidate ${candidate.id}`}
+                        type="checkbox"
+                        checked={selectedCandidateIds.includes(candidate.id)}
+                        onChange={(event) => handleCandidateCheckboxToggle(candidate.id, event.target.checked)}
+                      />
+                    </td>
+                    <td>
+                      <div>
+                        <strong>{coerceTitle(candidate.extracted_fields)}</strong>
+                      </div>
+                      <code>{candidate.id}</code>
+                    </td>
+                    <td>{candidate.state}</td>
+                    <td>{candidate.dedupe_confidence ?? "-"}</td>
+                    <td>{candidate.risk_flags.length > 0 ? candidate.risk_flags.join(", ") : "-"}</td>
+                    <td>{formatTimestamp(candidate.updated_at)}</td>
+                    <td>
+                      <button
+                        className="button button-ghost"
+                        type="button"
+                        onClick={() => handleCandidateQuickSelect(candidate.id)}
+                      >
+                        {selectedCandidateId === candidate.id ? "Selected" : "Select"}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -965,40 +1139,49 @@ export function ModeratorCockpitClient(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {modules.map((module) => (
-                <tr key={module.id}>
-                  <td>
-                    <div>
-                      <strong>{module.name}</strong>
-                    </div>
-                    <code>{module.module_id}</code>
-                  </td>
-                  <td>{module.kind}</td>
-                  <td>{module.trust_level}</td>
-                  <td>{module.scopes.length > 0 ? module.scopes.join(", ") : "-"}</td>
-                  <td>{String(module.enabled)}</td>
-                  <td>{formatTimestamp(module.updated_at)}</td>
-                  <td>
-                    <button
-                      className="button button-ghost"
-                      type="button"
-                      onClick={() => void handleModuleToggle(module)}
-                      disabled={moduleToggleBusyId === module.module_id}
-                    >
-                      {moduleToggleBusyId === module.module_id
-                        ? "Updating…"
-                        : module.enabled
-                          ? "Disable"
-                          : "Enable"}
-                    </button>
-                  </td>
+              {moduleListLoading ? (
+                <tr>
+                  <td colSpan={7}>Loading modules…</td>
                 </tr>
-              ))}
-              {modules.length === 0 ? (
+              ) : moduleError ? (
+                <tr>
+                  <td colSpan={7}>Unable to load modules: {moduleError}</td>
+                </tr>
+              ) : modules.length === 0 ? (
                 <tr>
                   <td colSpan={7}>No modules found for current filters.</td>
                 </tr>
-              ) : null}
+              ) : (
+                modules.map((module) => (
+                  <tr key={module.id}>
+                    <td>
+                      <div>
+                        <strong>{module.name}</strong>
+                      </div>
+                      <code>{module.module_id}</code>
+                    </td>
+                    <td>{module.kind}</td>
+                    <td>{module.trust_level}</td>
+                    <td>{module.scopes.length > 0 ? module.scopes.join(", ") : "-"}</td>
+                    <td>{String(module.enabled)}</td>
+                    <td>{formatTimestamp(module.updated_at)}</td>
+                    <td>
+                      <button
+                        className="button button-ghost"
+                        type="button"
+                        onClick={() => void handleModuleToggle(module)}
+                        disabled={moduleToggleBusyId === module.module_id}
+                      >
+                        {moduleToggleBusyId === module.module_id
+                          ? "Updating…"
+                          : module.enabled
+                            ? "Disable"
+                            : "Enable"}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -1022,7 +1205,20 @@ export function ModeratorCockpitClient(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {jobs.map((job) => {
+              {jobListLoading ? (
+                <tr>
+                  <td colSpan={9}>Loading jobs…</td>
+                </tr>
+              ) : jobError && jobs.length === 0 ? (
+                <tr>
+                  <td colSpan={9}>Unable to load jobs: {jobError}</td>
+                </tr>
+              ) : jobs.length === 0 ? (
+                <tr>
+                  <td colSpan={9}>No jobs found for current filters.</td>
+                </tr>
+              ) : (
+                jobs.map((job) => {
                 const inputs = asObject(job.inputs_json);
                 const result = asObject(job.result_json);
                 const error = asObject(job.error_json);
@@ -1068,12 +1264,8 @@ export function ModeratorCockpitClient(): JSX.Element {
                     <td>{formatTimestamp(job.updated_at)}</td>
                   </tr>
                 );
-              })}
-              {jobs.length === 0 ? (
-                <tr>
-                  <td colSpan={9}>No jobs found for current filters.</td>
-                </tr>
-              ) : null}
+              })
+              )}
             </tbody>
           </table>
         </div>

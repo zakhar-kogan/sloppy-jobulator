@@ -526,6 +526,74 @@ test("merge and override actions require reason before submit", async ({ page })
   expect(overrideCalls).toBe(1);
 });
 
+test("bulk patch validates transitions and applies state changes across selected candidates", async ({ page }) => {
+  const startedAt = "2026-02-10T20:02:39.338252Z";
+  const firstCandidate: CandidateRecord = {
+    id: PRIMARY_CANDIDATE_ID,
+    state: "needs_review",
+    dedupe_confidence: 0.91,
+    risk_flags: ["manual_review_needed"],
+    extracted_fields: { title: "E2E Primary Candidate" },
+    discovery_ids: ["c0315d98-ef37-49a3-b7ba-1cae768c8964"],
+    posting_id: POSTING_ID,
+    created_at: startedAt,
+    updated_at: startedAt
+  };
+  const secondCandidate: CandidateRecord = {
+    id: SECONDARY_CANDIDATE_ID,
+    state: "published",
+    dedupe_confidence: 0.72,
+    risk_flags: [],
+    extracted_fields: { title: "E2E Secondary Candidate" },
+    discovery_ids: ["9ab15d98-ef37-49a3-b7ba-1cae768c8964"],
+    posting_id: POSTING_ID,
+    created_at: startedAt,
+    updated_at: startedAt
+  };
+
+  const patchTargets: string[] = [];
+
+  await page.route(/\/api\/admin\/candidates(?:\?.*)?$/, async (route) =>
+    jsonResponse(route, [firstCandidate, secondCandidate])
+  );
+  await page.route(/\/api\/admin\/modules(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+  await page.route(/\/api\/admin\/jobs(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+  await page.route(/\/api\/admin\/candidates\/[^/?]+(?:\?.*)?$/, async (route) => {
+    const candidateId = route.request().url().split("/").at(-1) ?? "";
+    patchTargets.push(candidateId);
+    const body = route.request().postDataJSON() as { state: CandidateState };
+    if (candidateId.includes(PRIMARY_CANDIDATE_ID)) {
+      firstCandidate.state = body.state;
+    }
+    if (candidateId.includes(SECONDARY_CANDIDATE_ID)) {
+      secondCandidate.state = body.state;
+    }
+    return jsonResponse(route, candidateId.includes(PRIMARY_CANDIDATE_ID) ? firstCandidate : secondCandidate);
+  });
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+
+  await page.getByLabel(`Select candidate ${PRIMARY_CANDIDATE_ID}`).check();
+  await page.getByLabel(`Select candidate ${SECONDARY_CANDIDATE_ID}`).check();
+
+  const bulkForm = page.locator("article:has(h2:text-is('Selected Candidate Actions')) form").nth(3);
+  const bulkButton = bulkForm.getByRole("button", { name: "Apply Bulk Patch" });
+
+  await bulkForm.getByLabel("State").selectOption("publishable");
+  await expect(page.getByText("Invalid transitions for selected candidates:")).toBeVisible();
+  await expect(bulkButton).toBeDisabled();
+
+  await bulkForm.getByLabel("State").selectOption("archived");
+  await expect(page.getByText("Transition-ready: 2 / 2")).toBeVisible();
+  await bulkForm.getByLabel("Reason").fill("bulk archive from cockpit");
+  await expect(bulkButton).toBeEnabled();
+  await bulkButton.click();
+
+  await expect(page.getByText("Bulk patched 2 candidate(s) to archived.")).toBeVisible();
+  expect(patchTargets).toEqual([PRIMARY_CANDIDATE_ID, SECONDARY_CANDIDATE_ID]);
+});
+
 test("cockpit clamps filter and maintenance limits to backend contract bounds", async ({ page }) => {
   const startedAt = "2026-02-10T20:02:39.338252Z";
   const candidate: CandidateRecord = {
