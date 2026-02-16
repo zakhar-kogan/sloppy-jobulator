@@ -44,6 +44,9 @@ type JobRecord = {
   locked_by_module_id: string | null;
   lease_expires_at: string | null;
   next_run_at: string;
+  inputs_json?: Record<string, unknown>;
+  result_json?: Record<string, unknown>;
+  error_json?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 };
@@ -300,6 +303,68 @@ test("admin cockpit handles candidate, module, and jobs operator actions", async
   expect(capture.enqueueCalls).toBe(1);
   expect(capture.reapCalls).toBe(1);
   expect(postingStatus).toBe("archived");
+});
+
+test("jobs table surfaces redirect outcomes, retry scheduling, and payload inspection", async ({ page }) => {
+  const startedAt = "2026-02-10T20:02:39.338252Z";
+  const retryAt = new Date(Date.now() + 95_000).toISOString();
+  const jobs: JobRecord[] = [
+    {
+      id: "2ce78e70-f8d6-4f1d-9d90-bfe0fcdcc7ad",
+      kind: "extract",
+      target_type: "discovery",
+      target_id: "ce9ac1af-5b1f-4afd-afea-096085beaf48",
+      status: "queued",
+      attempt: 2,
+      locked_by_module_id: null,
+      lease_expires_at: null,
+      next_run_at: retryAt,
+      inputs_json: { source: "retry-test" },
+      result_json: {},
+      error_json: { message: "upstream timeout" },
+      created_at: startedAt,
+      updated_at: startedAt
+    },
+    {
+      id: "6b4a40f5-38c6-46f7-a843-cbd92217f775",
+      kind: "resolve_url_redirects",
+      target_type: "discovery",
+      target_id: "fcb55a66-f4dd-4298-b6e0-a28f5e18a7c2",
+      status: "done",
+      attempt: 1,
+      locked_by_module_id: null,
+      lease_expires_at: null,
+      next_run_at: startedAt,
+      inputs_json: { url: "http://example.edu/jobs/redirect?utm_source=feed" },
+      result_json: {
+        reason: "resolved",
+        redirect_hop_count: 1,
+        repository_outcome: {
+          status: "conflict_skipped",
+          resolved_normalized_url: "https://example.edu/jobs/redirect"
+        }
+      },
+      error_json: {},
+      created_at: startedAt,
+      updated_at: startedAt
+    }
+  ];
+
+  await page.route(/\/api\/admin\/candidates(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+  await page.route(/\/api\/admin\/modules(?:\?.*)?$/, async (route) => jsonResponse(route, []));
+  await page.route(/\/api\/admin\/jobs(?:\?.*)?$/, async (route) => jsonResponse(route, jobs));
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+  await expect(page.getByText("retry in")).toBeVisible();
+  await expect(page.getByText("repository outcome: conflict_skipped")).toBeVisible();
+  await expect(page.getByText("resolver reason: resolved")).toBeVisible();
+  await expect(page.getByText("redirect hops: 1")).toBeVisible();
+  await expect(page.getByText("resolved normalized URL: https://example.edu/jobs/redirect")).toBeVisible();
+  await expect(page.locator("article:has(h2:text-is('Jobs Table')) .status-error", { hasText: "upstream timeout" })).toBeVisible();
+
+  await page.locator("article:has(h2:text-is('Jobs Table')) summary", { hasText: "Inspect payloads" }).first().click();
+  await expect(page.getByText("\"source\": \"retry-test\"")).toBeVisible();
 });
 
 test("merge form rejects selecting the same candidate as secondary", async ({ page }) => {

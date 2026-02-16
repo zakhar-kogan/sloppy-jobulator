@@ -81,6 +81,9 @@ class AdminJobOut(BaseModel):
     locked_by_module_id: str | None = None
     lease_expires_at: datetime | None = None
     next_run_at: datetime
+    inputs_json: dict[str, Any] = Field(default_factory=dict)
+    result_json: dict[str, Any] = Field(default_factory=dict)
+    error_json: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 

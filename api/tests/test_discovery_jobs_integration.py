@@ -243,7 +243,9 @@ def test_discovery_idempotency_does_not_duplicate_job(api_client: TestClient) ->
 def test_discovery_optional_redirect_resolution_job_updates_discovery(
     api_client: TestClient,
     database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001009")
     discovery_response = api_client.post(
         "/discoveries",
         json={
@@ -328,6 +330,19 @@ def test_discovery_optional_redirect_resolution_job_updates_discovery(
         )
     )
     assert redirect_event_count == 1
+
+    admin_jobs_response = api_client.get(
+        "/admin/jobs",
+        params={"kind": "resolve_url_redirects", "status": "done"},
+        headers={"Authorization": "Bearer admin-token"},
+    )
+    assert admin_jobs_response.status_code == 200
+    admin_jobs = admin_jobs_response.json()
+    assert len(admin_jobs) == 1
+    result_json = admin_jobs[0]["result_json"]
+    assert result_json["reason"] == "resolved"
+    assert result_json["repository_outcome"]["status"] == "applied"
+    assert result_json["repository_outcome"]["resolved_normalized_url"] == resolved_normalized_url
 
 
 def test_discovery_redirect_resolution_uses_setting_defaults_and_metadata_overrides(
@@ -2081,6 +2096,9 @@ def test_admin_jobs_visibility_and_safe_mutations(
     assert len(jobs) == 1
     job_id = jobs[0]["id"]
     assert jobs[0]["target_id"] == posting_id
+    assert jobs[0]["inputs_json"]["posting_id"] == posting_id
+    assert jobs[0]["result_json"] == {}
+    assert jobs[0]["error_json"] == {}
 
     _run(
         _execute(

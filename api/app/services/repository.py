@@ -838,6 +838,7 @@ class PostgresRepository:
                     requested_status = status
                     resolved_status = status
                     retry_delay_seconds: int | None = None
+                    redirect_resolution_outcome: dict[str, Any] | None = None
 
                     if requested_status == "failed":
                         if attempt >= self.job_max_attempts:
@@ -905,13 +906,25 @@ class PostgresRepository:
                                 attempt=attempt,
                             )
                     if row["status"] == "done" and row["kind"] == "resolve_url_redirects" and row["target_type"] == "discovery" and row["target_id"]:
-                        await self._apply_redirect_resolution_result(
+                        redirect_resolution_outcome = await self._apply_redirect_resolution_result(
                             conn=conn,
                             job_id=row["id"],
                             discovery_id=row["target_id"],
                             actor_module_db_id=module_db_id,
                             result_json=result_json,
                         )
+                        merged_result_json = self._coerce_json_dict(result_json)
+                        merged_result_json["repository_outcome"] = redirect_resolution_outcome
+                        await conn.execute(
+                            """
+                            update jobs
+                            set result_json = $2::jsonb
+                            where id = $1::uuid
+                            """,
+                            row["id"],
+                            json.dumps(merged_result_json),
+                        )
+                        result_json = merged_result_json
 
                     await conn.execute(
                         """
@@ -934,6 +947,7 @@ class PostgresRepository:
                                 "attempt": attempt,
                                 "max_attempts": self.job_max_attempts,
                                 "retry_delay_seconds": retry_delay_seconds,
+                                "redirect_resolution_outcome": redirect_resolution_outcome,
                             }
                         ),
                     )
@@ -989,13 +1003,18 @@ class PostgresRepository:
         discovery_id: str,
         actor_module_db_id: str,
         result_json: dict[str, Any] | None,
-    ) -> None:
+    ) -> dict[str, Any]:
         payload = result_json if isinstance(result_json, dict) else {}
         resolved_url = self._coerce_text(payload.get("resolved_url"))
         resolved_normalized_url = self._coerce_text(payload.get("resolved_normalized_url"))
         resolved_canonical_hash = self._coerce_text(payload.get("resolved_canonical_hash"))
+        outcome: dict[str, Any] = {
+            "status": "skipped_missing_resolution",
+            "resolver_reason": self._coerce_text(payload.get("reason")),
+            "redirect_hop_count": self._coerce_int(payload.get("redirect_hop_count")),
+        }
         if not any([resolved_url, resolved_normalized_url, resolved_canonical_hash]):
-            return
+            return outcome
 
         discovery = await conn.fetchrow(
             """
@@ -1012,7 +1031,8 @@ class PostgresRepository:
             discovery_id,
         )
         if not discovery:
-            return
+            outcome["status"] = "skipped_discovery_not_found"
+            return outcome
 
         next_url = resolved_url or self._coerce_text(discovery["url"])
         next_normalized_url = resolved_normalized_url or self._coerce_text(discovery["normalized_url"])
@@ -1030,7 +1050,8 @@ class PostgresRepository:
             and next_normalized_url == current_normalized_url
             and next_canonical_hash == current_canonical_hash
         ):
-            return
+            outcome["status"] = "unchanged"
+            return outcome
 
         if discovery["external_id"] is None and next_normalized_url:
             existing = await conn.fetchval(
@@ -1066,10 +1087,15 @@ class PostgresRepository:
                             "job_id": job_id,
                             "resolved_url": next_url,
                             "resolved_normalized_url": next_normalized_url,
+                            "resolver_reason": self._coerce_text(payload.get("reason")),
+                            "redirect_hop_count": self._coerce_int(payload.get("redirect_hop_count")),
                         }
                     ),
                 )
-                return
+                outcome["status"] = "conflict_skipped"
+                outcome["resolved_url"] = next_url
+                outcome["resolved_normalized_url"] = next_normalized_url
+                return outcome
 
         await conn.execute(
             """
@@ -1114,6 +1140,11 @@ class PostgresRepository:
                 }
             ),
         )
+        outcome["status"] = "applied"
+        outcome["resolved_url"] = next_url
+        outcome["resolved_normalized_url"] = next_normalized_url
+        outcome["resolved_canonical_hash"] = next_canonical_hash
+        return outcome
 
     async def _materialize_extract_projection(
         self,
@@ -2758,6 +2789,9 @@ class PostgresRepository:
               locked_by_module_id::text as locked_by_module_id,
               lease_expires_at,
               next_run_at,
+              inputs_json,
+              result_json,
+              error_json,
               created_at,
               updated_at
             from jobs
@@ -2906,8 +2940,7 @@ class PostgresRepository:
             "updated_at": row["updated_at"],
         }
 
-    @staticmethod
-    def _admin_job_row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
+    def _admin_job_row_to_dict(self, row: asyncpg.Record) -> dict[str, Any]:
         return {
             "id": row["id"],
             "kind": row["kind"],
@@ -2918,6 +2951,9 @@ class PostgresRepository:
             "locked_by_module_id": row["locked_by_module_id"],
             "lease_expires_at": row["lease_expires_at"],
             "next_run_at": row["next_run_at"],
+            "inputs_json": self._coerce_json_dict(row["inputs_json"]),
+            "result_json": self._coerce_json_dict(row["result_json"]),
+            "error_json": self._coerce_json_dict(row["error_json"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }

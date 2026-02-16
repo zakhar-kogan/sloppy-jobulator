@@ -50,6 +50,9 @@ export type AdminJob = {
   locked_by_module_id: string | null;
   lease_expires_at: string | null;
   next_run_at: string;
+  inputs_json?: Record<string, unknown>;
+  result_json?: Record<string, unknown>;
+  error_json?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 };

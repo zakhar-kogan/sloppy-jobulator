@@ -52,9 +52,106 @@ type JobStatusFilter = "all" | JobStatus;
 type CandidateAction = "patch" | "merge" | "override";
 
 const PATCH_REASON_REQUIRED_STATES = new Set<CandidateState>(["rejected", "archived", "closed"]);
+const OPERATOR_TIMESTAMP = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short"
+});
 
 function requiresPatchReason(state: CandidateState): boolean {
   return PATCH_REASON_REQUIRED_STATES.has(state);
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
+function asText(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  return null;
+}
+
+function formatRetryWindow(nextRunAt: string): string | null {
+  const nextRunMs = Date.parse(nextRunAt);
+  if (!Number.isFinite(nextRunMs)) {
+    return null;
+  }
+  const deltaSeconds = Math.round((nextRunMs - Date.now()) / 1000);
+  if (deltaSeconds <= 0) {
+    return "retry due now";
+  }
+  if (deltaSeconds < 60) {
+    return `retry in ${deltaSeconds}s`;
+  }
+  return `retry in ${Math.ceil(deltaSeconds / 60)}m`;
+}
+
+function formatJobPayload(payload: Record<string, unknown>): string {
+  if (Object.keys(payload).length === 0) {
+    return "{}";
+  }
+  return JSON.stringify(payload, null, 2);
+}
+
+function formatOperatorTimestamp(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    return value;
+  }
+  return OPERATOR_TIMESTAMP.format(new Date(parsed));
+}
+
+function describeJobError(errorJson: Record<string, unknown>): string | null {
+  return (
+    asText(errorJson.detail) ??
+    asText(errorJson.message) ??
+    asText(errorJson.error) ??
+    asText(errorJson.reason) ??
+    null
+  );
+}
+
+function describeRedirectVisibility(job: AdminJob): string[] {
+  if (job.kind !== "resolve_url_redirects") {
+    return [];
+  }
+
+  const result = asObject(job.result_json);
+  const repositoryOutcome = asObject(result.repository_outcome);
+  const details: string[] = [];
+  const resolutionStatus = asText(repositoryOutcome.status);
+  if (resolutionStatus) {
+    details.push(`repository outcome: ${resolutionStatus}`);
+  }
+
+  const resolverReason = asText(result.reason) ?? asText(repositoryOutcome.resolver_reason);
+  if (resolverReason) {
+    details.push(`resolver reason: ${resolverReason}`);
+  }
+
+  const hopCount = asNumber(result.redirect_hop_count) ?? asNumber(repositoryOutcome.redirect_hop_count);
+  if (hopCount !== null) {
+    details.push(`redirect hops: ${hopCount}`);
+  }
+
+  const resolvedNormalizedUrl = asText(repositoryOutcome.resolved_normalized_url) ?? asText(result.resolved_normalized_url);
+  if (resolvedNormalizedUrl) {
+    details.push(`resolved normalized URL: ${resolvedNormalizedUrl}`);
+  }
+
+  return details;
 }
 
 export function ModeratorCockpitClient(): JSX.Element {
@@ -918,32 +1015,63 @@ export function ModeratorCockpitClient(): JSX.Element {
                 <th>Status</th>
                 <th>Target</th>
                 <th>Attempt</th>
+                <th>Operator Visibility</th>
                 <th>Lease Expires</th>
                 <th>Next Run</th>
                 <th>Updated</th>
               </tr>
             </thead>
             <tbody>
-              {jobs.map((job) => (
-                <tr key={job.id}>
-                  <td>
-                    <code>{job.id}</code>
-                  </td>
-                  <td>{job.kind}</td>
-                  <td>{job.status}</td>
-                  <td>
-                    <div>{job.target_type}</div>
-                    <code>{job.target_id ?? "-"}</code>
-                  </td>
-                  <td>{job.attempt}</td>
-                  <td>{formatTimestamp(job.lease_expires_at)}</td>
-                  <td>{formatTimestamp(job.next_run_at)}</td>
-                  <td>{formatTimestamp(job.updated_at)}</td>
-                </tr>
-              ))}
+              {jobs.map((job) => {
+                const inputs = asObject(job.inputs_json);
+                const result = asObject(job.result_json);
+                const error = asObject(job.error_json);
+                const retryLabel = job.status === "queued" && job.attempt > 0 ? formatRetryWindow(job.next_run_at) : null;
+                const redirectVisibility = describeRedirectVisibility(job);
+                const errorSummary = describeJobError(error);
+
+                return (
+                  <tr key={job.id}>
+                    <td>
+                      <code>{job.id}</code>
+                    </td>
+                    <td>{job.kind}</td>
+                    <td>{job.status}</td>
+                    <td>
+                      <div>{job.target_type}</div>
+                      <code>{job.target_id ?? "-"}</code>
+                    </td>
+                    <td>{job.attempt}</td>
+                    <td>
+                      {retryLabel ? <p className="status">{retryLabel}</p> : null}
+                      {redirectVisibility.map((detail) => (
+                        <p key={`${job.id}-${detail}`} className="status">
+                          {detail}
+                        </p>
+                      ))}
+                      {errorSummary ? <p className="status status-error">{errorSummary}</p> : null}
+                      <details className="job-details">
+                        <summary>Inspect payloads</summary>
+                        <p className="status">inputs_json</p>
+                        <pre>{formatJobPayload(inputs)}</pre>
+                        <p className="status">result_json</p>
+                        <pre>{formatJobPayload(result)}</pre>
+                        <p className="status">error_json</p>
+                        <pre>{formatJobPayload(error)}</pre>
+                      </details>
+                    </td>
+                    <td>{formatTimestamp(job.lease_expires_at)}</td>
+                    <td>
+                      <div>{formatTimestamp(job.next_run_at)}</div>
+                      <p className="status">{formatOperatorTimestamp(job.next_run_at)}</p>
+                    </td>
+                    <td>{formatTimestamp(job.updated_at)}</td>
+                  </tr>
+                );
+              })}
               {jobs.length === 0 ? (
                 <tr>
-                  <td colSpan={8}>No jobs found for current filters.</td>
+                  <td colSpan={9}>No jobs found for current filters.</td>
                 </tr>
               ) : null}
             </tbody>
