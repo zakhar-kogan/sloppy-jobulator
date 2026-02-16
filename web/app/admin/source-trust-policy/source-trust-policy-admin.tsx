@@ -12,13 +12,6 @@ const TRUST_LEVEL_OPTIONS: ModuleTrustLevel[] = ["trusted", "semi_trusted", "unt
 
 type EnabledFilter = "all" | "true" | "false";
 
-const DEFAULT_RULES_JSON = `{
-  "min_confidence": 0.8,
-  "merge_decision_actions": {
-    "needs_review": "needs_review"
-  }
-}`;
-
 function encodeListQuery(params: {
   sourceKey: string;
   enabled: EnabledFilter;
@@ -44,14 +37,6 @@ function encodeListQuery(params: {
   return query.toString();
 }
 
-function parseJsonObject(input: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(input);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("rules_json must be a JSON object.");
-  }
-  return parsed as Record<string, unknown>;
-}
-
 function formatTimestamp(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) {
@@ -74,10 +59,8 @@ export function SourceTrustPolicyAdminClient(): JSX.Element {
 
   const [sourceKey, setSourceKey] = useState("");
   const [trustLevel, setTrustLevel] = useState<ModuleTrustLevel>("semi_trusted");
-  const [autoPublish, setAutoPublish] = useState(true);
-  const [requiresModeration, setRequiresModeration] = useState(true);
+  const [autoPublish, setAutoPublish] = useState(false);
   const [enabled, setEnabled] = useState(true);
-  const [rulesJson, setRulesJson] = useState(DEFAULT_RULES_JSON);
 
   const [formBusy, setFormBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -139,15 +122,6 @@ export function SourceTrustPolicyAdminClient(): JSX.Element {
       return;
     }
 
-    let rulesPayload: Record<string, unknown>;
-    try {
-      rulesPayload = parseJsonObject(rulesJson);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "rules_json must be valid JSON.";
-      setActionError(detail);
-      return;
-    }
-
     setFormBusy(true);
 
     try {
@@ -157,8 +131,8 @@ export function SourceTrustPolicyAdminClient(): JSX.Element {
         body: JSON.stringify({
           trust_level: trustLevel,
           auto_publish: autoPublish,
-          requires_moderation: requiresModeration,
-          rules_json: rulesPayload,
+          requires_moderation: !autoPublish,
+          rules_json: {},
           enabled
         })
       });
@@ -209,9 +183,7 @@ export function SourceTrustPolicyAdminClient(): JSX.Element {
     setSourceKey(policy.source_key);
     setTrustLevel(policy.trust_level);
     setAutoPublish(policy.auto_publish);
-    setRequiresModeration(policy.requires_moderation);
     setEnabled(policy.enabled);
-    setRulesJson(JSON.stringify(policy.rules_json ?? {}, null, 2));
     setMessage(`Loaded ${policy.source_key} into form.`);
     setActionError(null);
   }
@@ -318,23 +290,12 @@ export function SourceTrustPolicyAdminClient(): JSX.Element {
           </label>
 
           <label className="checkbox-control">
-            <input
-              type="checkbox"
-              checked={requiresModeration}
-              onChange={(event) => setRequiresModeration(event.target.checked)}
-            />
-            <span>requires_moderation</span>
-          </label>
-
-          <label className="checkbox-control">
             <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
             <span>enabled</span>
           </label>
-
-          <label className="control">
-            <span>rules_json</span>
-            <textarea value={rulesJson} onChange={(event) => setRulesJson(event.target.value)} rows={12} />
-          </label>
+          <p className="status">
+            Advanced policy rules are hidden in 80/20 mode. Queue routing uses default moderation behavior.
+          </p>
 
           <div className="actions">
             <button className="button button-primary" type="submit" disabled={formBusy}>

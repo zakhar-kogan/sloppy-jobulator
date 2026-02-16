@@ -29,6 +29,7 @@
 25. For first-pass OTel adoption, instrument service edges (FastAPI/worker lifecycle + db/http client hooks + trace/log correlation) via dedicated bootstrap modules before adding domain-specific metrics.
 26. For high-impact operator actions (for example queue maintenance), add explicit confirmation affordances in UI and assert disabled/enabled behavior in both mocked and live E2E suites.
 27. When adding cockpit analytics/counts, ship them as additive facet endpoints (for example `/candidates/facets`) instead of mutating list payload contracts, then compose quick-filter UX on top.
+28. For staged simplification, enforce reduced behavior at admin/API boundaries first (normalize or ignore advanced payload fields) before deleting deep internals.
 
 ## Anti-patterns
 1. Hidden side effects without tests or receipts.

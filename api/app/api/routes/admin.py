@@ -25,6 +25,7 @@ from app.services.repository import (
 )
 
 router = APIRouter()
+SIMPLE_TRUST_POLICY_RULES: dict[str, object] = {}
 
 
 @router.get("/modules", response_model=list[ModuleOut])
@@ -220,13 +221,17 @@ async def put_source_trust_policy(
     if not principal.actor_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid human principal")
 
+    # 80/20 mode: keep admin surface minimal and route through one default rule profile.
+    effective_auto_publish = bool(payload.auto_publish) and payload.trust_level != "untrusted"
+    effective_requires_moderation = not effective_auto_publish
+
     try:
         await repository.upsert_source_trust_policy(
             source_key=source_key,
             trust_level=payload.trust_level,
-            auto_publish=payload.auto_publish,
-            requires_moderation=payload.requires_moderation,
-            rules_json=payload.rules_json,
+            auto_publish=effective_auto_publish,
+            requires_moderation=effective_requires_moderation,
+            rules_json=SIMPLE_TRUST_POLICY_RULES,
             enabled=payload.enabled,
             actor_user_id=principal.actor_id,
         )

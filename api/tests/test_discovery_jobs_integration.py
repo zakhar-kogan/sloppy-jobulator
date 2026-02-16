@@ -1763,7 +1763,9 @@ def test_admin_source_trust_policy_crud_and_filters(
     )
     assert put_response.status_code == 200
     assert put_response.json()["source_key"] == source_key
-    assert put_response.json()["rules_json"]["merge_decision_actions"]["needs_review"] == "reject"
+    assert put_response.json()["rules_json"] == {}
+    assert put_response.json()["auto_publish"] is True
+    assert put_response.json()["requires_moderation"] is False
 
     created_operation = _run(
         _fetchval(
@@ -1815,6 +1817,7 @@ def test_admin_source_trust_policy_crud_and_filters(
     )
     assert update_response.status_code == 200
     assert update_response.json()["trust_level"] == "trusted"
+    assert update_response.json()["rules_json"] == {}
 
     updated_operation = _run(
         _fetchval(
@@ -1917,7 +1920,7 @@ def test_admin_source_trust_policy_requires_admin_scope(
     assert "admin:write" in response.json()["detail"]
 
 
-def test_admin_source_trust_policy_put_rejects_invalid_rules_json(
+def test_admin_source_trust_policy_put_ignores_advanced_rules_json(
     api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1936,8 +1939,10 @@ def test_admin_source_trust_policy_put_rejects_invalid_rules_json(
         },
         headers={"Authorization": "Bearer admin-token"},
     )
-    assert response.status_code == 422
-    assert "merge_decision_actions.needs_review" in response.json()["detail"]
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["rules_json"] == {}
+    assert payload["requires_moderation"] is False
 
 
 def test_admin_source_trust_policy_patch_returns_not_found_for_unknown_key(
