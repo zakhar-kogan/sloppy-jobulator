@@ -42,7 +42,7 @@
 | I1 | not_started | TaskRouter abstraction not implemented. |
 | I2 | not_started | LiteLLM adapter not implemented. |
 | J1 | in_progress | OTel baseline is wired for API/workers (FastAPI + asyncpg + httpx spans, worker lifecycle spans, trace/log correlation, OTLP exporter-ready config); telemetry validation script now uses API health fallback probing plus Cloud Monitoring REST queries (CLI-version resilient), and current staging check shows missing worker backlog series for configured worker service label. |
-| J2 | in_progress | Cloud Operations dashboard + alert policy artifacts are versioned and now have environment-bindable templates/import scripts (`docs/observability/*.template.*`, `scripts/import-observability-assets.sh`); real staging/prod channel + label values still depend on secret bindings. |
+| J2 | in_progress | Cloud Operations dashboard + alert policy artifacts are versioned with environment-bindable templates/import scripts; dashboard import is now idempotent (create/update by `displayName`) and validated against staging, while alert-policy application still depends on notification-channel bindings plus `gcloud alpha` availability in the execution environment. |
 | K1 | not_started | Connector SDK package not implemented. |
 | K2 | not_started | RSS connector not implemented. |
 | K3 | not_started | Telegram connector not implemented. |

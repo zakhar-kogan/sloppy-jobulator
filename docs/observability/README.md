@@ -30,6 +30,9 @@ SJ_OBS_WORKER_OTEL_SERVICE=sloppy-jobulator-workers-staging \
 SJ_OBS_NOTIFICATION_CHANNELS="projects/<project>/notificationChannels/<id>" \
 bash scripts/import-observability-assets.sh
 ```
+Notes:
+- Dashboard import is idempotent by `displayName` (create on first run, update on reruns).
+- Alert policy import currently requires the `gcloud alpha` component. If unavailable, set `SJ_OBS_SKIP_ALERT_POLICIES=true` to import only dashboard assets.
 3. Validate telemetry quality in the bound environment:
 ```bash
 GCP_PROJECT_ID="<project>" \
