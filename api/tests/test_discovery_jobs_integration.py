@@ -212,6 +212,41 @@ def test_discovery_enqueue_claim_result_and_projection_flow(api_client: TestClie
     assert posting_event_count == 1
 
 
+def test_job_result_rejects_explicit_dead_letter_status(api_client: TestClient) -> None:
+    discovery_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-dead-letter-reject",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "https://example.edu/jobs/dead-letter-reject",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert discovery_response.status_code == 202
+    discovery_id = discovery_response.json()["discovery_id"]
+
+    jobs_response = api_client.get("/jobs", headers=PROCESSOR_HEADERS)
+    assert jobs_response.status_code == 200
+    job = _find_job(jobs_response.json(), kind="extract", target_id=discovery_id)
+
+    claim_response = api_client.post(
+        f"/jobs/{job['id']}/claim",
+        json={"lease_seconds": 120},
+        headers=PROCESSOR_HEADERS,
+    )
+    assert claim_response.status_code == 200
+
+    result_response = api_client.post(
+        f"/jobs/{job['id']}/result",
+        json={"status": "dead_letter", "error_json": {"detail": "worker rejected input"}},
+        headers=PROCESSOR_HEADERS,
+    )
+    assert result_response.status_code == 422
+    assert result_response.json()["detail"] == "invalid terminal status"
+
+
 def test_discovery_idempotency_does_not_duplicate_job(api_client: TestClient) -> None:
     payload = {
         "origin_module_id": "local-connector",

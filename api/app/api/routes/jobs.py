@@ -70,7 +70,7 @@ async def submit_job_result(
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
-    if payload.status not in {"done", "failed", "dead_letter"}:
+    if payload.status not in {"done", "failed"}:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid terminal status")
 
     if not principal.actor_id:
