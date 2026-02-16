@@ -539,6 +539,70 @@ test("cockpit live applies operator guardrails for patch transitions and reasone
     .toBe("rejected");
 });
 
+test("cockpit live bulk patch enforces transition guardrails and persists updates", async ({ page, request }) => {
+  const suffix = uniqueSuffix();
+  const first = await createDiscoveryAndProcess(
+    request,
+    `live-bulk-a-${suffix}`,
+    `live-bulk-a-${suffix}`,
+    `Live Bulk A ${suffix}`,
+    false,
+  );
+  const second = await createDiscoveryAndProcess(
+    request,
+    `live-bulk-b-${suffix}`,
+    `live-bulk-b-${suffix}`,
+    `Live Bulk B ${suffix}`,
+    true,
+  );
+
+  const firstCandidate = await findCandidateByDiscovery(request, first.discoveryId);
+  const secondCandidate = await findCandidateByDiscovery(request, second.discoveryId);
+
+  const publishSecondResp = await request.post(`${API_BASE_URL}/candidates/${secondCandidate.id}/override`, {
+    headers: ADMIN_HEADERS,
+    data: {
+      state: "published",
+      reason: "bulk test setup",
+      posting_status: "active",
+    },
+  });
+  expect(publishSecondResp.ok()).toBeTruthy();
+
+  await page.goto("/admin/cockpit");
+  await expect(page.getByRole("heading", { name: "Operator Cockpit" })).toBeVisible();
+
+  const queueFilters = page.locator("article:has(h2:text-is('Candidate Queue Filters'))");
+  await queueFilters.getByLabel("State").selectOption("all");
+  await queueFilters.getByLabel("Limit").fill("100");
+  await queueFilters.getByLabel("Offset").fill("0");
+  await queueFilters.getByRole("button", { name: "Refresh Candidates" }).click();
+
+  await page.getByLabel(`Select candidate ${firstCandidate.id}`).check();
+  await page.getByLabel(`Select candidate ${secondCandidate.id}`).check();
+
+  const bulkForm = page.locator("article:has(h2:text-is('Selected Candidate Actions')) form").nth(3);
+  const bulkButton = bulkForm.getByRole("button", { name: "Apply Bulk Patch" });
+
+  await bulkForm.getByLabel("State").selectOption("publishable");
+  await expect(page.getByText("Invalid transitions for selected candidates:")).toBeVisible();
+  await expect(bulkButton).toBeDisabled();
+
+  await bulkForm.getByLabel("State").selectOption("archived");
+  await bulkForm.getByLabel("Reason").fill("live bulk archive");
+  await expect(bulkButton).toBeEnabled();
+  await bulkButton.click();
+  await expect(page.getByText("Bulk patched 2 candidate(s) to archived.")).toBeVisible();
+
+  await expect
+    .poll(async () => {
+      const archived = await listCandidates(request, "state=archived&limit=100");
+      const archivedIds = new Set(archived.map((candidate) => candidate.id));
+      return archivedIds.has(firstCandidate.id) && archivedIds.has(secondCandidate.id);
+    })
+    .toBeTruthy();
+});
+
 test("cockpit live queue pagination drives patch action against selected candidate", async ({ page, request }) => {
   const suffix = uniqueSuffix();
   await createDiscoveryAndProcess(
