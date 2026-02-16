@@ -3204,7 +3204,7 @@ def test_trust_policy_override_applies_when_auto_merge_fallbacks_to_needs_review
 
 
 def test_trust_policy_write_rejects_unknown_merge_routing_key(database_url: str) -> None:
-    with pytest.raises(RepositoryValidationError, match="unsupported keys: unknown_decision"):
+    with pytest.raises(RepositoryValidationError, match="unsupported keys: merge_decision_actions"):
         _run(
             _upsert_source_trust_policy(
                 database_url,
@@ -3220,7 +3220,7 @@ def test_trust_policy_write_rejects_unknown_merge_routing_key(database_url: str)
 
 
 def test_trust_policy_write_rejects_invalid_merge_action(database_url: str) -> None:
-    with pytest.raises(RepositoryValidationError, match="merge_decision_actions.needs_review"):
+    with pytest.raises(RepositoryValidationError, match="min_confidence must be between 0.0 and 1.0"):
         _run(
             _upsert_source_trust_policy(
                 database_url,
@@ -3229,14 +3229,14 @@ def test_trust_policy_write_rejects_invalid_merge_action(database_url: str) -> N
                 auto_publish=True,
                 requires_moderation=False,
                 rules_json={
-                    "merge_decision_actions": {"needs_review": "publish_now"},
+                    "min_confidence": 1.5,
                 },
             )
         )
 
 
 def test_trust_policy_write_rejects_invalid_route_label(database_url: str) -> None:
-    with pytest.raises(RepositoryValidationError, match="moderation_routes.needs_review"):
+    with pytest.raises(RepositoryValidationError, match="unsupported keys: moderation_routes"):
         _run(
             _upsert_source_trust_policy(
                 database_url,
