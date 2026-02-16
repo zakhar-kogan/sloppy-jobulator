@@ -263,6 +263,21 @@ main {
   gap: 0.45rem;
 }
 
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.catalogue-shell {
+  margin-top: 1.25rem;
+}
+
+.detail-card {
+  margin-top: 1rem;
+}
+
 .job-details {
   margin-top: 0.35rem;
 }

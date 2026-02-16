@@ -1,77 +1,32 @@
 import Link from "next/link";
 
-const sampleRows = [
-  {
-    title: "Research Assistant in Computational Biology",
-    org: "Example University",
-    status: "active"
-  },
-  {
-    title: "PhD Scholarship in Robotics",
-    org: "Sample Institute of Technology",
-    status: "active"
-  }
-];
+import { PublicCatalogueClient } from "./public-catalogue-client";
 
 export default function HomePage() {
   return (
     <main>
       <section className="hero">
+        <p className="eyebrow">Public Catalogue</p>
         <h1>Research Opportunities, De-duplicated</h1>
         <p>
-          Bootstrap catalogue UI connected to v1 API contracts. Search, filter, and moderation surfaces follow in
-          upcoming phases.
+          Search and browse moderated opportunities with filters, sorting, and posting previews. Results come from the
+          live `GET /postings` API contract.
         </p>
-        <p>
-          <Link className="inline-link" href="/admin/source-trust-policy">
-            Open source trust policy admin
-          </Link>
-        </p>
-        <p>
-          <Link className="inline-link" href="/admin/url-normalization-overrides">
-            Open URL normalization overrides admin
-          </Link>
-        </p>
-        <p>
+
+        <div className="actions">
           <Link className="inline-link" href="/admin/cockpit">
             Open moderator cockpit
           </Link>
-        </p>
-
-        <div className="controls">
-          <div className="control">
-            <label htmlFor="search">Search</label>
-            <input id="search" placeholder="keyword, organization, field" />
-          </div>
-          <div className="control">
-            <label htmlFor="sector">Sector</label>
-            <select id="sector" defaultValue="all">
-              <option value="all">All sectors</option>
-              <option value="academia">Academia</option>
-              <option value="industry">Industry</option>
-            </select>
-          </div>
-          <div className="control">
-            <label htmlFor="degree">Degree</label>
-            <select id="degree" defaultValue="all">
-              <option value="all">All levels</option>
-              <option value="bachelors">Bachelors</option>
-              <option value="masters">Masters</option>
-              <option value="phd">PhD</option>
-            </select>
-          </div>
+          <Link className="inline-link" href="/admin/source-trust-policy">
+            Open source trust policy admin
+          </Link>
+          <Link className="inline-link" href="/admin/url-normalization-overrides">
+            Open URL normalization overrides admin
+          </Link>
         </div>
       </section>
 
-      <section className="grid" aria-label="posting list">
-        {sampleRows.map((row) => (
-          <article className="card" key={row.title}>
-            <h3>{row.title}</h3>
-            <p>{row.org}</p>
-            <span className="badge">{row.status}</span>
-          </article>
-        ))}
-      </section>
+      <PublicCatalogueClient />
     </main>
   );
 }
