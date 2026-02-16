@@ -2,13 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.security import get_human_principal
 from app.schemas.admin import (
+    AdminJobStatusFilter,
     AdminJobOut,
     AdminJobsMaintenanceOut,
     ModuleEnabledPatchRequest,
     ModuleKind,
     ModuleOut,
     JobKind,
-    JobStatus,
     ModuleTrustLevel,
     SourceTrustPolicyEnabledPatchRequest,
     SourceTrustPolicyOut,
@@ -94,7 +94,7 @@ async def patch_module_enabled(
 async def list_jobs(
     principal=Depends(get_human_principal),
     repository=Depends(get_repository),
-    job_status: JobStatus | None = Query(default=None, alias="status"),
+    job_status: AdminJobStatusFilter | None = Query(default=None, alias="status"),
     kind: JobKind | None = Query(default=None),
     target_type: str | None = Query(default=None, min_length=1),
     limit: int = Query(default=50, ge=1, le=200),

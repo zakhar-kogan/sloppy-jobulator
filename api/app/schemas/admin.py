@@ -7,6 +7,7 @@ ModuleTrustLevel = Literal["trusted", "semi_trusted", "untrusted"]
 ModuleKind = Literal["connector", "processor"]
 JobKind = Literal["dedupe", "extract", "enrich", "check_freshness", "resolve_url_redirects"]
 JobStatus = Literal["queued", "claimed", "done", "failed", "dead_letter"]
+AdminJobStatusFilter = Literal["queued", "claimed", "done", "failed"]
 
 
 class SourceTrustPolicyOut(BaseModel):

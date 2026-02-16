@@ -70,6 +70,7 @@ SOURCE_POLICY_RULE_KEYS = {
 MODULE_KINDS = {"connector", "processor"}
 JOB_KINDS = {"dedupe", "extract", "enrich", "check_freshness", "resolve_url_redirects"}
 JOB_STATUSES = {"queued", "claimed", "done", "failed", "dead_letter"}
+ADMIN_JOB_FILTER_STATUSES = {"queued", "claimed", "done", "failed"}
 QUEUE_AGE_BUCKETS = ("lt_24h", "d1_3", "d3_7", "gt_7d")
 URL_OVERRIDE_TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 URL_OVERRIDE_DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -2893,8 +2894,8 @@ class PostgresRepository:
         pool = await self._get_pool()
 
         normalized_status = self._coerce_text(status)
-        if normalized_status and normalized_status not in JOB_STATUSES:
-            raise RepositoryValidationError("status must be one of: queued, claimed, done, failed, dead_letter")
+        if normalized_status and normalized_status not in ADMIN_JOB_FILTER_STATUSES:
+            raise RepositoryValidationError("status must be one of: queued, claimed, done, failed")
 
         normalized_kind = self._coerce_text(kind)
         if normalized_kind and normalized_kind not in JOB_KINDS:

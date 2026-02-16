@@ -2330,6 +2330,20 @@ def test_admin_jobs_requires_admin_scope(
     assert "admin:write" in response.json()["detail"]
 
 
+def test_admin_jobs_rejects_dead_letter_filter(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001021")
+
+    response = api_client.get(
+        "/admin/jobs",
+        params={"status": "dead_letter"},
+        headers={"Authorization": "Bearer admin-token"},
+    )
+    assert response.status_code == 422
+
+
 def test_dedupe_policy_auto_merges_high_confidence_duplicate_candidate(
     api_client: TestClient,
     database_url: str,
