@@ -4376,13 +4376,8 @@ class PostgresRepository:
             )
 
         default_auto_publish = normalized_trust_level in {"trusted", "semi_trusted"}
-        default_requires_moderation = normalized_trust_level != "trusted"
+        default_requires_moderation = normalized_trust_level == "untrusted"
         default_rules_json: dict[str, Any] = {}
-        if normalized_trust_level in {"trusted", "semi_trusted"}:
-            default_rules_json["min_confidence"] = 0.72
-        if normalized_trust_level == "semi_trusted":
-            # Semi-trusted sources may auto-publish when no conflict signals are present.
-            default_rules_json["allow_if_no_conflicts"] = True
 
         return SourceTrustPolicyRecord(
             source_key=f"default:{normalized_trust_level}",
@@ -4401,14 +4396,12 @@ class PostgresRepository:
         dedupe_confidence: float | None,
         risk_flags: list[str],
     ) -> tuple[str, str, dict[str, Any]]:
-        rules_json = trust_policy.rules_json if isinstance(trust_policy.rules_json, dict) else {}
-        min_confidence = self._coerce_float(rules_json.get("min_confidence"))
+        rules_json: dict[str, Any] = {}
+        min_confidence: float | None = 0.72 if trust_policy.trust_level in {"trusted", "semi_trusted"} else None
         meets_confidence = min_confidence is None or (
             dedupe_confidence is not None and dedupe_confidence >= min_confidence
         )
         has_conflict_flag = any("conflict" in flag.lower() for flag in risk_flags)
-        require_human_review = self._coerce_bool(rules_json.get("require_human_review"))
-        allow_if_no_conflicts = self._coerce_bool(rules_json.get("allow_if_no_conflicts"))
 
         should_auto_publish = False
         reason = "insufficient_projection_data"
@@ -4420,7 +4413,6 @@ class PostgresRepository:
                     trust_policy.auto_publish
                     and not trust_policy.requires_moderation
                     and meets_confidence
-                    and not require_human_review
                 )
                 if should_auto_publish:
                     reason = "trusted_auto_publish"
@@ -4430,28 +4422,23 @@ class PostgresRepository:
                     reason = "policy_requires_moderation"
                 elif not meets_confidence:
                     reason = "below_min_confidence"
-                else:
-                    reason = "rule_requires_human_review"
             elif trust_level == "semi_trusted":
                 should_auto_publish = (
                     trust_policy.auto_publish
                     and meets_confidence
-                    and not require_human_review
                     and not has_conflict_flag
-                    and (not trust_policy.requires_moderation or allow_if_no_conflicts)
+                    and not trust_policy.requires_moderation
                 )
                 if should_auto_publish:
                     reason = "semi_trusted_auto_publish"
                 elif has_conflict_flag:
                     reason = "semi_trusted_conflict_flag"
-                elif trust_policy.requires_moderation and not allow_if_no_conflicts:
+                elif trust_policy.requires_moderation:
                     reason = "policy_requires_moderation"
                 elif not meets_confidence:
                     reason = "below_min_confidence"
                 elif not trust_policy.auto_publish:
                     reason = "policy_auto_publish_disabled"
-                else:
-                    reason = "rule_requires_human_review"
             else:
                 reason = "untrusted_requires_moderation"
 
