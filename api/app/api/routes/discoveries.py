@@ -24,6 +24,12 @@ async def create_discovery(
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
+    if not payload.url:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="url is required in 80/20 ingestion mode",
+        )
+
     normalization_overrides_json: str | None = None
     try:
         normalization_overrides_json = await repository.get_enabled_url_normalization_overrides_json()

@@ -275,6 +275,21 @@ def test_discovery_idempotency_does_not_duplicate_job(api_client: TestClient) ->
     assert jobs[0]["target_id"] == first_discovery_id
 
 
+def test_discovery_rejects_missing_url_in_80_20_mode(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-missing-url",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert response.status_code == 422
+    assert "url is required" in response.json()["detail"]
+
+
 def test_discovery_optional_redirect_resolution_job_updates_discovery(
     api_client: TestClient,
     database_url: str,
