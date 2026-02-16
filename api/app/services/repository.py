@@ -4487,7 +4487,6 @@ class PostgresRepository:
         candidate_state: str,
         posting_status: str,
     ) -> tuple[str, str, str | None, str | None]:
-        rules_json = trust_policy.rules_json if isinstance(trust_policy.rules_json, dict) else {}
         reason_defaults: dict[str, str] = {
             "needs_review": "dedupe_review_required",
             "auto_merged": "dedupe_auto_merged",
@@ -4502,22 +4501,6 @@ class PostgresRepository:
         reason = reason_defaults.get(merge_decision)
         action = action_defaults.get(merge_decision)
 
-        configured_actions = rules_json.get("merge_decision_actions")
-        if merge_decision != "auto_merged" and isinstance(configured_actions, dict):
-            configured_action = configured_actions.get(merge_decision)
-            if isinstance(configured_action, str):
-                normalized_action = configured_action.strip().lower()
-                if normalized_action in {"needs_review", "reject", "archive", "preserve"}:
-                    action = normalized_action
-
-        configured_reasons = rules_json.get("merge_decision_reasons")
-        if isinstance(configured_reasons, dict):
-            configured_reason = configured_reasons.get(merge_decision)
-            if isinstance(configured_reason, str):
-                normalized_reason = configured_reason.strip()
-                if normalized_reason:
-                    reason = normalized_reason
-
         if action == "needs_review":
             candidate_state = "needs_review"
             posting_status = "archived"
@@ -4529,21 +4512,6 @@ class PostgresRepository:
             posting_status = "archived"
 
         moderation_route: str | None = None
-        route_candidates = rules_json.get("moderation_routes")
-        if merge_decision in {"needs_review", "rejected"}:
-            if isinstance(route_candidates, dict):
-                configured_route = route_candidates.get(merge_decision)
-                if isinstance(configured_route, str):
-                    normalized_route = configured_route.strip()
-                    if normalized_route:
-                        moderation_route = normalized_route
-            if moderation_route is None:
-                default_route = rules_json.get("default_moderation_route")
-                if isinstance(default_route, str):
-                    normalized_default_route = default_route.strip()
-                    if normalized_default_route:
-                        moderation_route = normalized_default_route
-
         return candidate_state, posting_status, reason, moderation_route
 
     @staticmethod

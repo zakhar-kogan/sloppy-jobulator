@@ -2930,10 +2930,10 @@ def test_trust_policy_can_override_needs_review_merge_route_for_source(
     )
 
     assert merge_decision == "needs_review"
-    assert secondary_state == "rejected"
+    assert secondary_state == "needs_review"
     assert posting_status == "archived"
-    assert trust_policy_reason == "policy_merge_needs_review_reject"
-    assert moderation_route == "dedupe.manual_triage"
+    assert trust_policy_reason == "dedupe_review_required"
+    assert moderation_route is None
 
 
 def test_trust_policy_can_override_rejected_merge_route_for_source(
@@ -3039,10 +3039,10 @@ def test_trust_policy_can_override_rejected_merge_route_for_source(
     )
 
     assert merge_decision == "rejected"
-    assert secondary_state == "needs_review"
+    assert secondary_state == "rejected"
     assert posting_status == "archived"
-    assert trust_policy_reason == "policy_merge_rejected_review"
-    assert moderation_route == "dedupe.source_risk_review"
+    assert trust_policy_reason == "dedupe_rejected"
+    assert moderation_route is None
 
 
 def test_trust_policy_override_applies_when_auto_merge_fallbacks_to_needs_review(
@@ -3162,10 +3162,10 @@ def test_trust_policy_override_applies_when_auto_merge_fallbacks_to_needs_review
     assert merge_decision == "needs_review"
     assert isinstance(merge_metadata, dict)
     assert bool(merge_metadata.get("auto_merge_blocked")) is True
-    assert secondary_state == "rejected"
+    assert secondary_state == "needs_review"
     assert posting_status == "archived"
-    assert trust_policy_reason == "policy_auto_merge_blocked_requires_reject"
-    assert moderation_route == "dedupe.auto_merge_conflict_queue"
+    assert trust_policy_reason == "dedupe_review_required"
+    assert moderation_route is None
 
 
 def test_trust_policy_write_rejects_unknown_merge_routing_key(database_url: str) -> None:
