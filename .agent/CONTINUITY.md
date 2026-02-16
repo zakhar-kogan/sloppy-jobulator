@@ -14,8 +14,8 @@ In `template` mode, keep this file as scaffold-only.
 ## Snapshot
 
 Goal: Ship Phase 1 baseline with DB-backed API/worker runtime, observability baseline, and deploy/migration safety gates.
-Now: E2/H2/public increments plus F2 trust-policy fallback hardening and L1 live cockpit rebaseline are validated; DB-backed trust/postings slices and full live cockpit suite are green.
-Next: Execute staging/prod environment binding and validation for `J1/J2/M1`, then close residual `G1/H1` relevance and catalogue UX polish items.
+Now: E2/H2/public increments plus F2 trust-policy fallback hardening and L1 live cockpit rebaseline are validated; `G1/H1` relevance+share UX polish landed, and staging deploy execution proof is green.
+Next: Resolve `J1/J2` environment blockers (worker telemetry series + dashboard IAM / alert-policy rollout), then capture production deploy receipt for `M1`.
 Open Questions: exact production Supabase URL/key provisioning and human role metadata conventions are UNCONFIRMED.
 
 ## Done (recent)
@@ -42,6 +42,7 @@ Open Questions: exact production Supabase URL/key provisioning and human role me
 - 2026-02-16 `[TOOL]` `make db-up -> make db-reset -> (escalated) SJ_DATABASE_URL=... DATABASE_URL=... uv run --project api --extra dev pytest api/tests/test_discovery_jobs_integration.py -k trust_policy -> (escalated) ... -k postings -> (escalated) fnm exec --using 24.13.0 pnpm --dir web exec playwright test -c playwright.live.config.ts web/tests-e2e/admin-cockpit.live.spec.ts --reporter=line` passed (`16/16` trust-policy slice, `4/4` postings slice, `8/8` live cockpit).
 - 2026-02-16 `[TOOL]` `GCP_PROJECT_ID=sloppy-jobulator SJ_OBS_ENVIRONMENT=staging SJ_OBS_API_CLOUD_RUN_SERVICE=sloppy-jobulator-api-staging SJ_OBS_WORKER_OTEL_SERVICE=sloppy-jobulator-workers-staging SJ_API_BASE_URL=https://sloppy-jobulator-api-staging-uylwyqgtza-uc.a.run.app bash scripts/validate-telemetry-quality.sh` failed cleanly after script hardening: API probe falls back to `/`, API request_count series resolves, worker backlog series is missing for configured staging labels.
 - 2026-02-16 `[TOOL]` `GCP_PROJECT_ID=sloppy-jobulator SJ_OBS_ENVIRONMENT=staging ... SJ_OBS_SKIP_ALERT_POLICIES=true bash scripts/import-observability-assets.sh` now performs idempotent dashboard import (create then update path verified), duplicate dashboard created during script iteration was removed, and alert-policy import is explicitly skipped when `gcloud alpha` is not installed.
+- 2026-02-16 `[TOOL]` Deploy workflow receipts: `22062434197` (`environment=staging`, observability/telemetry disabled) completed `success` with API/workers/web deploy steps green; `22062753162` (`run_observability_import=true`, `run_telemetry_validation=true`) failed at `Import observability assets` because staging deploy service account lacks Monitoring Dashboard write permission.
 - 2026-02-12 `[TOOL]` `uv run --project workers --extra dev pytest workers/tests/test_redirects.py workers/tests/test_freshness.py` passed (`7/7`).
 - 2026-02-12 `[TOOL]` `uv run --project api --extra dev pytest api/tests/test_urls.py -q` passed (`2/2`).
 - 2026-02-12 `[TOOL]` `fnm exec --using 24.13.0 pnpm --dir web exec playwright test web/tests-e2e/admin-cockpit.spec.ts --reporter=line` passed (`6/6`).

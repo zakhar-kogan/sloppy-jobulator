@@ -42,7 +42,7 @@
 | I1 | not_started | TaskRouter abstraction not implemented. |
 | I2 | not_started | LiteLLM adapter not implemented. |
 | J1 | in_progress | OTel baseline is wired for API/workers (FastAPI + asyncpg + httpx spans, worker lifecycle spans, trace/log correlation, OTLP exporter-ready config); telemetry validation script now uses API health fallback probing plus Cloud Monitoring REST queries (CLI-version resilient), and current staging check shows missing worker backlog series for configured worker service label. |
-| J2 | in_progress | Cloud Operations dashboard + alert policy artifacts are versioned with environment-bindable templates/import scripts; dashboard import is now idempotent (create/update by `displayName`) and validated against staging, while alert-policy application still depends on notification-channel bindings plus `gcloud alpha` availability in the execution environment. |
+| J2 | in_progress | Cloud Operations dashboard + alert policy artifacts are versioned with environment-bindable templates/import scripts; dashboard import is now idempotent (create/update by `displayName`) and validated locally against staging project bindings, workflow defaults now support dashboard-only import unless alert-policy import is explicitly requested, and remaining blockers are deploy service-account Monitoring Dashboard write permission plus staged alert-policy/channel rollout. |
 | K1 | not_started | Connector SDK package not implemented. |
 | K2 | not_started | RSS connector not implemented. |
 | K3 | not_started | Telegram connector not implemented. |
@@ -50,7 +50,7 @@
 | K5 | not_started | Social connectors not implemented. |
 | L1 | done | Live E2E coverage now spans bulk moderation and legacy cockpit flows with deterministic queue-selection fixtures aligned to current candidate-state transitions; DB-backed targeted API redirect/admin/trust/postings integration slices and full live cockpit suite pass. |
 | L2 | not_started | Load/perf testing not implemented. |
-| M1 | in_progress | Quality CI is split into fast and DB-backed integration checks with explicit `migration-safety` + `deploy-readiness-gate`, and a staged `deploy.yml` workflow now binds env-specific secrets/commands; first live staging/prod executions remain pending. |
+| M1 | in_progress | Quality CI is split into fast and DB-backed integration checks with explicit `migration-safety` + `deploy-readiness-gate`, and staged `deploy.yml` execution is validated (`staging` deploy run `22062434197` succeeded across API/workers/web); remaining execution work is production receipt plus optional observability gates once J2 permissions/bindings are resolved. |
 | M2 | not_started | Launch hardening checklist/runbook not complete. |
 
 ## Next Implementation Steps (Priority Order)

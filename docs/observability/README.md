@@ -33,6 +33,7 @@ bash scripts/import-observability-assets.sh
 Notes:
 - Dashboard import is idempotent by `displayName` (create on first run, update on reruns).
 - Alert policy import currently requires the `gcloud alpha` component. If unavailable, set `SJ_OBS_SKIP_ALERT_POLICIES=true` to import only dashboard assets.
+- In GitHub Actions `deploy.yml`, observability import defaults to dashboard-only; set workflow input `run_alert_policy_import=true` to attempt alert policy import.
 3. Validate telemetry quality in the bound environment:
 ```bash
 GCP_PROJECT_ID="<project>" \

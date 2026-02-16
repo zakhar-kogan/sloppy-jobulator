@@ -15,6 +15,11 @@ on:
         required: false
         type: boolean
         default: false
+      run_alert_policy_import:
+        description: "Optional: when importing observability assets, include alert policies (requires gcloud alpha support)"
+        required: false
+        type: boolean
+        default: false
       run_telemetry_validation:
         description: "Optional: run telemetry validation after deploy"
         required: false
@@ -81,6 +86,7 @@ jobs:
           SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_STAGING }}
           SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_STAGING }}
           SJ_OBS_NOTIFICATION_CHANNELS: ${{ secrets.SJ_NOTIFICATION_CHANNELS_STAGING }}
+          SJ_OBS_SKIP_ALERT_POLICIES: ${{ github.event.inputs.run_alert_policy_import == 'true' && 'false' || 'true' }}
         run: bash scripts/import-observability-assets.sh
 
       - name: Validate telemetry quality
@@ -147,6 +153,7 @@ jobs:
           SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_PROD }}
           SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_PROD }}
           SJ_OBS_NOTIFICATION_CHANNELS: ${{ secrets.SJ_NOTIFICATION_CHANNELS_PROD }}
+          SJ_OBS_SKIP_ALERT_POLICIES: ${{ github.event.inputs.run_alert_policy_import == 'true' && 'false' || 'true' }}
         run: bash scripts/import-observability-assets.sh
 
       - name: Validate telemetry quality
