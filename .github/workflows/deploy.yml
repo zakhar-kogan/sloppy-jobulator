@@ -40,6 +40,7 @@ jobs:
       SJ_DEPLOY_API_CMD: ${{ secrets.SJ_DEPLOY_API_CMD_STAGING }}
       SJ_DEPLOY_WORKER_CMD: ${{ secrets.SJ_DEPLOY_WORKER_CMD_STAGING }}
       SJ_DEPLOY_WEB_CMD: ${{ secrets.SJ_DEPLOY_WEB_CMD_STAGING }}
+      SJ_API_BASE_URL: ${{ secrets.SJ_API_BASE_URL_STAGING }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,6 +52,7 @@ jobs:
             SJ_DEPLOY_API_CMD
             SJ_DEPLOY_WORKER_CMD
             SJ_DEPLOY_WEB_CMD
+            SJ_API_BASE_URL
           )
           for var_name in "${required[@]}"; do
             if [ -z "${!var_name}" ]; then
@@ -78,6 +80,11 @@ jobs:
 
       - name: Deploy Web
         run: bash -lc "${SJ_DEPLOY_WEB_CMD}"
+
+      - name: Run MVP smoke (staging)
+        env:
+          SJ_API_BASE_URL: ${{ env.SJ_API_BASE_URL }}
+        run: bash scripts/mvp-smoke-staging.sh
 
       - name: Import observability assets
         if: github.event.inputs.run_observability_import == 'true'

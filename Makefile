@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 DB_URL ?= postgresql://postgres:postgres@localhost:5432/sloppy_jobulator
 
-.PHONY: build test lint typecheck dev db-up db-down db-reset test-integration
+.PHONY: build test lint typecheck dev db-up db-down db-reset test-integration mvp-smoke-staging
 
 build:
 	python -m compileall api/app workers/app
@@ -39,3 +39,6 @@ db-down:
 
 db-reset:
 	DATABASE_URL=$(DB_URL) bash scripts/reset_db.sh
+
+mvp-smoke-staging:
+	bash scripts/mvp-smoke-staging.sh
