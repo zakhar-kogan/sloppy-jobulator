@@ -16,6 +16,8 @@
     "test:e2e:live:headed": "playwright test -c playwright.live.config.ts --headed"
   },
   "dependencies": {
+    "ag-grid-community": "^35.1.0",
+    "ag-grid-react": "^35.1.0",
     "next": "14.2.5",
     "react": "18.3.1",
     "react-dom": "18.3.1"

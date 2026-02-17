@@ -12,6 +12,9 @@ class PostingListOut(BaseModel):
     id: str
     title: str
     organization_name: str
+    opportunity_kind: str | None = None
+    areas: list[str] = Field(default_factory=list)
+    description_text: str | None = None
     canonical_url: str
     status: PostingStatus = "active"
     country: str | None = None

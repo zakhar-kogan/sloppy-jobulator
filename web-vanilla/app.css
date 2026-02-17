@@ -1,0 +1,122 @@
+:root {
+  --bg: #f3f4ef;
+  --surface: #ffffff;
+  --text: #111214;
+  --muted: #667085;
+  --accent: #1d4f2f;
+  --border: #d6d7d1;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.hero,
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.hero h1 {
+  margin: 0;
+}
+
+.hero p {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.6rem;
+}
+
+.filters label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.filters input,
+.filters select,
+.filters button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  background: #fff;
+  font: inherit;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.actions button {
+  cursor: pointer;
+}
+
+.status {
+  margin: 0.7rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 950px;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  padding: 0.6rem 0.45rem;
+  vertical-align: top;
+  font-size: 0.9rem;
+}
+
+th {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  background: #dcedc8;
+  color: #1f3e19;
+  margin-right: 0.3rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+}
+
+a {
+  color: var(--accent);
+}

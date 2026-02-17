@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sloppy Jobulator</title>
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <h1>Sloppy Jobulator</h1>
+        <p>Vanilla static catalogue client for the live postings API.</p>
+      </section>
+
+      <section class="panel">
+        <form id="filters" class="filters">
+          <label>
+            API Base URL
+            <input id="apiBaseUrl" name="api_base_url" placeholder="http://127.0.0.1:8000" />
+          </label>
+          <label>
+            Search
+            <input name="q" placeholder="keyword, org, description" />
+          </label>
+          <label>
+            Organization
+            <input name="organization_name" placeholder="Example University" />
+          </label>
+          <label>
+            Country
+            <input name="country" placeholder="US" />
+          </label>
+          <label>
+            Tag
+            <input name="tag" placeholder="biology" />
+          </label>
+          <label>
+            Status
+            <select name="status">
+              <option value="">all</option>
+              <option value="active">active</option>
+              <option value="stale">stale</option>
+              <option value="archived">archived</option>
+              <option value="closed">closed</option>
+            </select>
+          </label>
+          <label>
+            Remote
+            <select name="remote_filter">
+              <option value="all">all</option>
+              <option value="remote">remote</option>
+              <option value="onsite">onsite</option>
+            </select>
+          </label>
+          <label>
+            Sort
+            <select name="sort_by">
+              <option value="updated_at">updated_at</option>
+              <option value="created_at">created_at</option>
+              <option value="deadline">deadline</option>
+              <option value="published_at">published_at</option>
+            </select>
+          </label>
+          <label>
+            Direction
+            <select name="sort_dir">
+              <option value="desc">desc</option>
+              <option value="asc">asc</option>
+            </select>
+          </label>
+          <label>
+            Page Size
+            <select name="limit">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+            </select>
+          </label>
+          <div class="actions">
+            <button type="submit">Apply</button>
+            <button id="resetButton" type="button">Reset</button>
+            <button id="prevButton" type="button">Previous</button>
+            <button id="nextButton" type="button">Next</button>
+          </div>
+        </form>
+        <p id="statusLine" class="status">Loading…</p>
+      </section>
+
+      <section class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Organization</th>
+                <th>Description</th>
+                <th>Location</th>
+                <th>Status</th>
+                <th>Updated</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

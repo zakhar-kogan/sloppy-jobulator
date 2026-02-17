@@ -8,7 +8,9 @@ fi
 
 apply_with_host_psql() {
   psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f db/migrations/0001_schema_v1.sql
-  psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f db/seeds/001_taxonomy.sql
+  for seed_file in db/seeds/*.sql; do
+    psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$seed_file"
+  done
 }
 
 apply_with_compose_psql() {
@@ -23,7 +25,9 @@ apply_with_compose_psql() {
   fi
 
   cat db/migrations/0001_schema_v1.sql | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$db_user" -d "$db_name"
-  cat db/seeds/001_taxonomy.sql | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$db_user" -d "$db_name"
+  for seed_file in db/seeds/*.sql; do
+    cat "$seed_file" | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$db_user" -d "$db_name"
+  done
 }
 
 if command -v psql >/dev/null 2>&1; then
