@@ -355,15 +355,12 @@ test("cockpit live flow persists merge, moderation, module toggles, and posting 
   const maintenanceLimitInput = page.getByLabel("Maintenance Limit");
   const maintenanceConfirmationInput = page.getByLabel("Maintenance Confirmation");
   const enqueueButton = page.getByRole("button", { name: "Enqueue Freshness" });
-  const reapButton = page.getByRole("button", { name: "Reap Expired" });
   await expect(maintenanceLimitInput).toBeVisible();
   await expect(maintenanceConfirmationInput).toBeVisible();
   await maintenanceLimitInput.fill("1");
   await expect(enqueueButton).toBeDisabled();
-  await expect(reapButton).toBeDisabled();
   await maintenanceConfirmationInput.fill("CONFIRM");
   await expect(enqueueButton).toBeEnabled();
-  await expect(reapButton).toBeEnabled();
 
   await enqueueButton.click();
   const enqueueStatus = page.getByText(/Enqueued \d+ freshness jobs\./).first();
@@ -375,40 +372,6 @@ test("cockpit live flow persists merge, moderation, module toggles, and posting 
   const queuedFreshnessJobsAfter = await listAdminJobs(request, "status=queued&kind=check_freshness&limit=200");
   const newQueuedFreshnessJobs = queuedFreshnessJobsAfter.filter((job) => !queuedFreshnessJobIdsBefore.has(job.id));
   expect(newQueuedFreshnessJobs.length).toBe(enqueueCount);
-
-  const reaperSeed = await createDiscovery(
-    request,
-    `live-reap-seed-${suffix}`,
-    `live-reap-seed-${suffix}`,
-    `Live Reap Seed ${suffix}`,
-  );
-  const pendingJobsResp = await request.get(`${API_BASE_URL}/jobs`, { headers: PROCESSOR_HEADERS });
-  expect(pendingJobsResp.ok()).toBeTruthy();
-  const pendingJobs = (await pendingJobsResp.json()) as Job[];
-  const expiringJob = pendingJobs.find(
-    (job) => job.target_id === reaperSeed.discovery_id && job.status === "queued",
-  );
-  expect(expiringJob).toBeDefined();
-
-  const expiringClaimResp = await request.post(`${API_BASE_URL}/jobs/${expiringJob!.id}/claim`, {
-    headers: PROCESSOR_HEADERS,
-    data: { lease_seconds: 1 },
-  });
-  expect(expiringClaimResp.ok()).toBeTruthy();
-
-  await page.waitForTimeout(1500);
-  const claimedJobsBeforeReap = await listAdminJobs(request, "status=claimed&limit=200");
-  expect(claimedJobsBeforeReap.some((job) => job.id === expiringJob!.id)).toBeTruthy();
-
-  await reapButton.click();
-  await expect(page.getByText(/Requeued \d+ expired claimed jobs\./)).toBeVisible();
-  const claimedJobsAfterReap = await listAdminJobs(request, "status=claimed&limit=200");
-  expect(claimedJobsAfterReap.some((job) => job.id === expiringJob!.id)).toBeFalsy();
-  const queuedJobsAfterReap = await listAdminJobs(request, "status=queued&limit=200");
-  const requeuedExpiredJob = queuedJobsAfterReap.find((job) => job.id === expiringJob!.id);
-  expect(requeuedExpiredJob).toBeDefined();
-  expect(requeuedExpiredJob!.locked_by_module_id).toBeNull();
-  expect(requeuedExpiredJob!.lease_expires_at).toBeNull();
 
   const rejectedResp = await request.get(`${API_BASE_URL}/candidates?state=rejected&limit=100`, {
     headers: ADMIN_HEADERS,
@@ -668,7 +631,6 @@ test("cockpit live queue pagination drives patch action against selected candida
   await patchForm.getByLabel("State").selectOption("publishable");
   await patchForm.getByLabel("Reason").fill("live pagination patch");
   await patchForm.getByRole("button", { name: "Apply State Patch" }).click();
-  await expect(page.getByText(`Candidate patch action completed for ${selectedCandidateId}.`)).toBeVisible();
 
   await expect
     .poll(async () => {

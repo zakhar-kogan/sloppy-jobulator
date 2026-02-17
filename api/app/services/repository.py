@@ -66,7 +66,12 @@ class SourceTrustPolicyRecord:
 SOURCE_POLICY_TRUST_LEVELS = {"trusted", "semi_trusted", "untrusted"}
 SOURCE_POLICY_RULE_KEYS = {
     "min_confidence",
+    "merge_decision_actions",
+    "merge_decision_reasons",
+    "moderation_routes",
 }
+SOURCE_POLICY_MERGE_DECISIONS = {"needs_review", "auto_merged", "rejected"}
+SOURCE_POLICY_MERGE_ACTIONS = {"needs_review", "reject", "archive"}
 MODULE_KINDS = {"connector", "processor"}
 JOB_KINDS = {"dedupe", "extract", "enrich", "check_freshness", "resolve_url_redirects"}
 JOB_STATUSES = {"queued", "claimed", "done", "failed", "dead_letter"}
@@ -4044,7 +4049,74 @@ class PostgresRepository:
             else:
                 normalized_rules["min_confidence"] = min_confidence
 
+        # Compatibility validation: these routing maps are accepted/validated but
+        # intentionally not persisted in the 80/20 trust-policy profile.
+        self._validate_source_policy_decision_map(
+            raw_rules.get("merge_decision_actions"),
+            field_key="merge_decision_actions",
+            allow_values=SOURCE_POLICY_MERGE_ACTIONS,
+            strict=strict,
+        )
+        self._validate_source_policy_decision_map(
+            raw_rules.get("merge_decision_reasons"),
+            field_key="merge_decision_reasons",
+            allow_values=None,
+            strict=strict,
+        )
+        self._validate_source_policy_decision_map(
+            raw_rules.get("moderation_routes"),
+            field_key="moderation_routes",
+            allow_values=None,
+            strict=strict,
+        )
+
         return normalized_rules
+
+    def _validate_source_policy_decision_map(
+        self,
+        value: Any,
+        *,
+        field_key: str,
+        allow_values: set[str] | None,
+        strict: bool,
+    ) -> dict[str, str]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            if strict:
+                raise RepositoryValidationError(f"rules_json contains unsupported keys: {field_key}")
+            return {}
+
+        normalized: dict[str, str] = {}
+        invalid = False
+
+        for raw_decision, raw_target in value.items():
+            decision = self._coerce_text(raw_decision)
+            target = self._coerce_text(raw_target)
+            decision_token = decision.lower() if decision else None
+            target_token = target.lower() if target else None
+
+            if not decision_token or decision_token not in SOURCE_POLICY_MERGE_DECISIONS:
+                invalid = True
+                continue
+            if not target_token:
+                invalid = True
+                continue
+
+            if allow_values is None:
+                if not URL_OVERRIDE_TOKEN_RE.match(target_token):
+                    invalid = True
+                    continue
+            elif target_token not in allow_values:
+                invalid = True
+                continue
+
+            normalized[decision_token] = target_token
+
+        if strict and (invalid or len(normalized) != len(value)):
+            raise RepositoryValidationError(f"rules_json contains unsupported keys: {field_key}")
+
+        return normalized
 
     @staticmethod
     def _has_projection_signal(*, extraction: dict[str, Any], projection_payload: dict[str, Any]) -> bool:
