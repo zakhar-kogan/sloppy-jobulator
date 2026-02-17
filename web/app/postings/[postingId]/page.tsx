@@ -116,6 +116,14 @@ export default async function PostingDetailPage({
           <Link className="inline-link" href="/">
             Back to catalogue
           </Link>
+          <Link className="inline-link" href={`/?organization_name=${encodeURIComponent(posting.organization_name)}`}>
+            More from this org
+          </Link>
+          {posting.tags[0] ? (
+            <Link className="inline-link" href={`/?tag=${encodeURIComponent(posting.tags[0])}`}>
+              Related by tag
+            </Link>
+          ) : null}
         </div>
       </section>
 
