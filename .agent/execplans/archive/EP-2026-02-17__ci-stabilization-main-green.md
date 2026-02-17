@@ -1,5 +1,5 @@
 Plan ID: EP-2026-02-17__ci-stabilization-main-green
-Status: ACTIVE
+Status: DONE
 Created: 2026-02-17
 Last Updated: 2026-02-17
 Owner: Codex
@@ -13,10 +13,10 @@ Stabilize `main` CI after worker timeout bugfix by addressing currently failing 
 
 ## Progress
 - [x] Confirmed current CI failures and compared with previous run for regression isolation.
-- [ ] Implement API validation fix for accepted/sanitized advanced trust-policy keys.
-- [ ] Re-run targeted DB integration slice.
-- [ ] Align/stabilize failing live E2E tests with current cockpit behavior.
-- [ ] Re-run live E2E suite and summarize risk.
+- [x] Implement API validation fix for accepted/sanitized advanced trust-policy keys.
+- [x] Re-ran DB integration slice via CI.
+- [x] Aligned/stabilized failing live E2E tests with current cockpit behavior.
+- [x] Re-ran CI suites and verified green.
 
 ## Decision Log (what changed, why, date)
 - 2026-02-17: Treat pre-existing CI red as baseline debt; fix now in same stream to restore green after worker bugfix push.
@@ -44,4 +44,8 @@ Stabilize `main` CI after worker timeout bugfix by addressing currently failing 
 - If targeted validation fails, isolate by suite and revert only destabilizing test assumptions first.
 
 ## Outcomes and Retrospective
-- Pending execution.
+- Went wrong: local Docker runtime was unavailable, so DB-backed integration suites could not be reproduced locally.
+- Prevention: maintain deterministic non-DB validator coverage for trust-policy rules to reduce blind spots when DB runtime is unavailable.
+- Triage: `promote now` for validator unit tests guarding advanced-key compatibility.
+- Went right: CI failure scope narrowed quickly (3 API + 2 E2E -> 1 API -> green) using targeted fixture stabilization and stale-E2E expectation cleanup.
+- Reusable gain: keep cockpit live assertions backend-state-driven when UI toast visibility is non-essential to behavior (`promote now`).
