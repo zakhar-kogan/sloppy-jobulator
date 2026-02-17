@@ -1,0 +1,16 @@
+# Speed up Cloud Run source deploys for Next.js web app
+node_modules/
+.next/
+test-results/
+playwright-report/
+coverage/
+*.log
+
+# VCS / editor noise
+.git/
+.gitignore
+.DS_Store
+
+# Local env files
+.env
+.env.*

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 
 import { PublicCatalogueClient } from "./public-catalogue-client";
 
@@ -20,7 +21,9 @@ export default function HomePage() {
         </div>
       </section>
 
-      <PublicCatalogueClient />
+      <Suspense fallback={<section className="catalogue-shell">Loading catalogue...</section>}>
+        <PublicCatalogueClient />
+      </Suspense>
     </main>
   );
 }
