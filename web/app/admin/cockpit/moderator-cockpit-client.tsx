@@ -1328,6 +1328,9 @@ export function ModeratorCockpitClient(): JSX.Element {
                 <th>Module</th>
                 <th>Kind</th>
                 <th>Trust</th>
+                <th>Ingested</th>
+                <th>Last Success</th>
+                <th>Last Error</th>
                 <th>Scopes</th>
                 <th>Enabled</th>
                 <th>Updated</th>
@@ -1337,15 +1340,15 @@ export function ModeratorCockpitClient(): JSX.Element {
             <tbody>
               {moduleListLoading ? (
                 <tr>
-                  <td colSpan={7}>Loading modules…</td>
+                  <td colSpan={10}>Loading modules…</td>
                 </tr>
               ) : moduleError ? (
                 <tr>
-                  <td colSpan={7}>Unable to load modules: {moduleError}</td>
+                  <td colSpan={10}>Unable to load modules: {moduleError}</td>
                 </tr>
               ) : modules.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>No modules found for current filters.</td>
+                  <td colSpan={10}>No modules found for current filters.</td>
                 </tr>
               ) : (
                 modules.map((module) => (
@@ -1358,6 +1361,17 @@ export function ModeratorCockpitClient(): JSX.Element {
                     </td>
                     <td>{module.kind}</td>
                     <td>{module.trust_level}</td>
+                    <td>{module.kind === "connector" ? String(module.ingested_count ?? 0) : "-"}</td>
+                    <td>
+                      {module.kind === "connector" ? formatTimestamp(module.last_ingested_at ?? null) : "-"}
+                    </td>
+                    <td title={module.last_ingest_error ?? ""}>
+                      {module.kind === "connector"
+                        ? module.last_ingest_error
+                          ? `${formatTimestamp(module.last_ingest_error_at ?? null)} · ${module.last_ingest_error}`
+                          : "-"
+                        : "-"}
+                    </td>
                     <td>{module.scopes.length > 0 ? module.scopes.join(", ") : "-"}</td>
                     <td>{String(module.enabled)}</td>
                     <td>{formatTimestamp(module.updated_at)}</td>

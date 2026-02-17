@@ -63,6 +63,10 @@ class ModuleOut(BaseModel):
     enabled: bool
     scopes: list[str] = Field(default_factory=list)
     trust_level: ModuleTrustLevel
+    ingested_count: int = 0
+    last_ingested_at: datetime | None = None
+    last_ingest_error_at: datetime | None = None
+    last_ingest_error: str | None = None
     created_at: datetime
     updated_at: datetime
 

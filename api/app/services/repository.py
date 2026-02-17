@@ -2795,9 +2795,38 @@ class PostgresRepository:
               enabled,
               scopes,
               trust_level::text as trust_level,
+              coalesce(ingest.ingested_count, 0)::bigint as ingested_count,
+              ingest.last_ingested_at,
+              ingest_err.last_ingest_error_at,
+              ingest_err.last_ingest_error,
               created_at,
               updated_at
             from modules
+            left join lateral (
+              select
+                count(*)::bigint as ingested_count,
+                max(d.created_at) as last_ingested_at
+              from discoveries d
+              where d.origin_module_id = modules.id
+            ) ingest on true
+            left join lateral (
+              select
+                j.updated_at as last_ingest_error_at,
+                coalesce(
+                  j.error_json->>'detail',
+                  j.error_json->>'message',
+                  j.error_json->>'error',
+                  j.error_json->>'reason'
+                ) as last_ingest_error
+              from jobs j
+              join discoveries d on d.id = j.target_id
+              where j.kind = 'extract'
+                and j.target_type = 'discovery'
+                and j.status = 'failed'
+                and d.origin_module_id = modules.id
+              order by j.updated_at desc, j.id desc
+              limit 1
+            ) ingest_err on true
             where ($1::text is null or module_id = $1)
               and ($2::text is null or kind::text = $2)
               and ($3::boolean is null or enabled = $3)
@@ -3096,6 +3125,10 @@ class PostgresRepository:
             "enabled": bool(row["enabled"]),
             "scopes": list(row["scopes"] or []),
             "trust_level": row["trust_level"],
+            "ingested_count": int(row["ingested_count"] or 0),
+            "last_ingested_at": row["last_ingested_at"],
+            "last_ingest_error_at": row["last_ingest_error_at"],
+            "last_ingest_error": row["last_ingest_error"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }

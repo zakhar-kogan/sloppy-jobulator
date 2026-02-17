@@ -34,6 +34,10 @@ export type AdminModule = {
   enabled: boolean;
   scopes: string[];
   trust_level: ModuleTrustLevel;
+  ingested_count?: number;
+  last_ingested_at?: string | null;
+  last_ingest_error_at?: string | null;
+  last_ingest_error?: string | null;
   created_at: string;
   updated_at: string;
 };

@@ -2348,6 +2348,59 @@ def test_admin_modules_requires_admin_scope(
     assert "admin:write" in response.json()["detail"]
 
 
+def test_admin_connector_modules_include_ingestion_health(
+    api_client: TestClient,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_mock_human_auth(monkeypatch, role="admin", user_id="00000000-0000-0000-0000-000000001025")
+    discovery_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-admin-module-health",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "https://example.edu/jobs/admin-module-health",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert discovery_response.status_code == 202
+    discovery_id = discovery_response.json()["discovery_id"]
+
+    _run(
+        _execute(
+            database_url,
+            """
+            update jobs
+            set
+              status = 'failed',
+              error_json = jsonb_build_object('detail', 'connector parse failed'),
+              updated_at = now()
+            where kind = 'extract'
+              and target_type = 'discovery'
+              and target_id = $1::uuid
+            """,
+            discovery_id,
+        )
+    )
+
+    response = api_client.get(
+        "/admin/modules",
+        params={"module_id": "local-connector", "kind": "connector"},
+        headers={"Authorization": "Bearer admin-token"},
+    )
+    assert response.status_code == 200
+    modules = response.json()
+    assert len(modules) == 1
+    module = modules[0]
+    assert module["module_id"] == "local-connector"
+    assert module["ingested_count"] >= 1
+    assert module["last_ingested_at"] is not None
+    assert module["last_ingest_error_at"] is not None
+    assert module["last_ingest_error"] == "connector parse failed"
+
+
 def test_admin_jobs_visibility_and_safe_mutations(
     api_client: TestClient,
     database_url: str,
