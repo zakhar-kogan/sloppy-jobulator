@@ -3207,14 +3207,18 @@ def test_trust_policy_can_override_needs_review_merge_route_for_source(
         api_client,
         database_url,
         external_id="ext-policy-needs-review-primary",
-        canonical_hash="policy-needs-review-primary-hash",
+        canonical_hash="policy-needs-review-shared-hash",
+        title="Front-end Engineering Residency",
+        organization_name="Northern Labs",
     )
     secondary_candidate_id, secondary_posting_id = _create_projected_candidate_and_posting(
         api_client,
         database_url,
         external_id="ext-policy-needs-review-secondary",
-        canonical_hash="policy-needs-review-secondary-hash",
+        canonical_hash="policy-needs-review-shared-hash",
         source_key="tests:merge-needs-review",
+        title="Marine Biology Fellowship",
+        organization_name="Southern Ocean Institute",
     )
 
     merge_decision = _run(
