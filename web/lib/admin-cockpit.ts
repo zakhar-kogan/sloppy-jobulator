@@ -38,8 +38,8 @@ export type AdminModule = {
   updated_at: string;
 };
 
-export type JobStatus = "queued" | "claimed" | "done" | "failed" | "dead_letter";
-export type JobKind = "dedupe" | "extract" | "enrich" | "check_freshness" | "resolve_url_redirects";
+export type JobStatus = "queued" | "claimed" | "done" | "failed";
+export type JobKind = "extract" | "check_freshness" | "resolve_url_redirects";
 
 export type AdminJob = {
   id: string;

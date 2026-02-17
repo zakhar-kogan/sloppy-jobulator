@@ -36,10 +36,10 @@ type ModuleRecord = {
 
 type JobRecord = {
   id: string;
-  kind: "dedupe" | "extract" | "enrich" | "check_freshness" | "resolve_url_redirects";
+  kind: "extract" | "check_freshness" | "resolve_url_redirects";
   target_type: string;
   target_id: string | null;
-  status: "queued" | "claimed" | "done" | "failed" | "dead_letter";
+  status: "queued" | "claimed" | "done" | "failed";
   attempt: number;
   locked_by_module_id: string | null;
   lease_expires_at: string | null;
