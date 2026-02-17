@@ -17,12 +17,6 @@ export default function HomePage() {
           <Link className="inline-link" href="/admin/cockpit">
             Open moderator cockpit
           </Link>
-          <Link className="inline-link" href="/admin/source-trust-policy">
-            Open source trust policy admin
-          </Link>
-          <Link className="inline-link" href="/admin/url-normalization-overrides">
-            Open URL normalization overrides admin
-          </Link>
         </div>
       </section>
 
