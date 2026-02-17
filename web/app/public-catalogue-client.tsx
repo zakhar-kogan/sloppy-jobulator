@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
@@ -18,25 +19,6 @@ type PostingListRow = {
   tags: string[];
   updated_at: string;
   created_at: string;
-};
-
-type PostingDetail = {
-  id: string;
-  title: string;
-  canonical_url: string;
-  organization_name: string;
-  status: PostingStatus;
-  country: string | null;
-  city: string | null;
-  region: string | null;
-  remote: boolean;
-  tags: string[];
-  areas: string[];
-  description_text: string | null;
-  application_url: string | null;
-  deadline: string | null;
-  published_at: string | null;
-  updated_at: string;
 };
 
 type RemoteFilter = "all" | "remote" | "onsite";
@@ -136,11 +118,6 @@ export function PublicCatalogueClient(): JSX.Element {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [selectedPostingId, setSelectedPostingId] = useState<string | null>(null);
-  const [detailById, setDetailById] = useState<Record<string, PostingDetail>>({});
-  const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
-
   const queryString = useMemo(
     () =>
       encodeQuery({
@@ -192,10 +169,6 @@ export function PublicCatalogueClient(): JSX.Element {
         }
         if (!isCancelled) {
           setRows(payload as PostingListRow[]);
-          if (selectedPostingId && !(payload as PostingListRow[]).some((row) => row.id === selectedPostingId)) {
-            setSelectedPostingId(null);
-            setDetailError(null);
-          }
         }
       } catch (fetchError) {
         const detail = fetchError instanceof Error ? fetchError.message : "Failed to load postings.";
@@ -214,38 +187,7 @@ export function PublicCatalogueClient(): JSX.Element {
     return () => {
       isCancelled = true;
     };
-  }, [queryString, selectedPostingId]);
-
-  const selectedDetail = selectedPostingId ? detailById[selectedPostingId] : null;
-
-  async function openPostingPreview(postingId: string): Promise<void> {
-    setSelectedPostingId(postingId);
-    setDetailError(null);
-    if (detailById[postingId]) {
-      return;
-    }
-
-    setDetailLoadingId(postingId);
-    try {
-      const response = await fetch(`/api/postings/${encodeURIComponent(postingId)}`, {
-        method: "GET",
-        cache: "no-store"
-      });
-      const payload: unknown = await response.json();
-      if (!response.ok) {
-        throw new Error(getApiErrorDetail(payload, "Failed to load posting detail."));
-      }
-      setDetailById((previous) => ({
-        ...previous,
-        [postingId]: payload as PostingDetail
-      }));
-    } catch (detailErrorValue) {
-      const detail = detailErrorValue instanceof Error ? detailErrorValue.message : "Failed to load posting detail.";
-      setDetailError(detail);
-    } finally {
-      setDetailLoadingId(null);
-    }
-  }
+  }, [queryString]);
 
   function handleResetFilters(): void {
     setQ("");
@@ -459,53 +401,13 @@ export function PublicCatalogueClient(): JSX.Element {
               <a className="inline-link" href={row.canonical_url} target="_blank" rel="noreferrer">
                 Open source
               </a>
-              <button className="button button-ghost" type="button" onClick={() => void openPostingPreview(row.id)}>
-                Preview
-              </button>
+              <Link className="inline-link" href={`/postings/${encodeURIComponent(row.id)}`}>
+                View details
+              </Link>
             </div>
           </article>
         ))}
       </section>
-
-      {selectedPostingId ? (
-        <article className="card detail-card">
-          <h3>Posting Preview</h3>
-          {detailLoadingId === selectedPostingId ? <p className="status">Loading detail…</p> : null}
-          {detailError ? <p className="status status-error">{detailError}</p> : null}
-          {selectedDetail ? (
-            <>
-              <p>
-                <strong>{selectedDetail.title}</strong>
-              </p>
-              <p className="status">
-                {selectedDetail.organization_name}
-                {selectedDetail.country ? ` · ${selectedDetail.country}` : ""}
-                {selectedDetail.region ? ` · ${selectedDetail.region}` : ""}
-                {selectedDetail.city ? ` · ${selectedDetail.city}` : ""}
-              </p>
-              <p className="status">Status: {selectedDetail.status}</p>
-              <p className="status">Deadline: {formatTimestamp(selectedDetail.deadline)}</p>
-              <p className="status">Published: {formatTimestamp(selectedDetail.published_at)}</p>
-              <p className="status">Updated: {formatTimestamp(selectedDetail.updated_at)}</p>
-              {selectedDetail.description_text ? <p>{selectedDetail.description_text}</p> : null}
-              <div className="tag-row">
-                {selectedDetail.tags.map((item) => (
-                  <span key={`${selectedDetail.id}-detail-${item}`} className="badge">
-                    {item}
-                  </span>
-                ))}
-              </div>
-              {selectedDetail.application_url ? (
-                <p>
-                  <a className="inline-link" href={selectedDetail.application_url} target="_blank" rel="noreferrer">
-                    Apply
-                  </a>
-                </p>
-              ) : null}
-            </>
-          ) : null}
-        </article>
-      ) : null}
     </section>
   );
 }
