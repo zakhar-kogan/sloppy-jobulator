@@ -15,6 +15,7 @@ async def execute_resolve_url_redirects(
     job: dict[str, Any],
     *,
     client: httpx.AsyncClient | None = None,
+    timeout_seconds: float = 10.0,
 ) -> dict[str, Any]:
     raw_inputs = job.get("inputs_json")
     inputs: dict[str, Any] = raw_inputs if isinstance(raw_inputs, dict) else {}
@@ -35,7 +36,7 @@ async def execute_resolve_url_redirects(
     if client is not None:
         resolution = await _resolve_redirect_chain(client=client, source_url=source_url, max_hops=max_hops)
     else:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as temp_client:
+        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as temp_client:
             resolution = await _resolve_redirect_chain(client=temp_client, source_url=source_url, max_hops=max_hops)
 
     resolved_url = _as_text(resolution.get("resolved_url")) or source_url
