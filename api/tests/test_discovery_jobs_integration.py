@@ -247,6 +247,108 @@ def test_job_result_rejects_explicit_dead_letter_status(api_client: TestClient) 
     assert result_response.json()["detail"] == "invalid terminal status"
 
 
+def test_jobs_list_excludes_deprecated_kinds(api_client: TestClient, database_url: str) -> None:
+    discovery_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-runtime-kind-filter",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "https://example.edu/jobs/runtime-kind-filter",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert discovery_response.status_code == 202
+    discovery_id = discovery_response.json()["discovery_id"]
+
+    _run(
+        _execute(
+            database_url,
+            """
+            insert into jobs (
+              kind,
+              target_type,
+              target_id,
+              status,
+              attempt,
+              next_run_at,
+              inputs_json
+            )
+            values (
+              'dedupe',
+              'discovery',
+              $1::uuid,
+              'queued',
+              0,
+              now(),
+              '{}'::jsonb
+            )
+            """,
+            discovery_id,
+        )
+    )
+
+    jobs_response = api_client.get("/jobs", headers=PROCESSOR_HEADERS)
+    assert jobs_response.status_code == 200
+    jobs = jobs_response.json()
+    assert any(job["kind"] == "extract" and job["target_id"] == discovery_id for job in jobs)
+    assert all(job["kind"] in {"extract", "check_freshness", "resolve_url_redirects"} for job in jobs)
+
+
+def test_claim_job_rejects_deprecated_kind(api_client: TestClient, database_url: str) -> None:
+    discovery_response = api_client.post(
+        "/discoveries",
+        json={
+            "origin_module_id": "local-connector",
+            "external_id": "ext-runtime-claim-kind-filter",
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+            "url": "https://example.edu/jobs/runtime-claim-kind-filter",
+            "metadata": {"source": "integration-test"},
+        },
+        headers=CONNECTOR_HEADERS,
+    )
+    assert discovery_response.status_code == 202
+    discovery_id = discovery_response.json()["discovery_id"]
+
+    deprecated_job_id = _run(
+        _fetchval(
+            database_url,
+            """
+            insert into jobs (
+              kind,
+              target_type,
+              target_id,
+              status,
+              attempt,
+              next_run_at,
+              inputs_json
+            )
+            values (
+              'dedupe',
+              'discovery',
+              $1::uuid,
+              'queued',
+              0,
+              now(),
+              '{}'::jsonb
+            )
+            returning id::text
+            """,
+            discovery_id,
+        )
+    )
+    assert deprecated_job_id is not None
+
+    claim_response = api_client.post(
+        f"/jobs/{deprecated_job_id}/claim",
+        json={"lease_seconds": 120},
+        headers=PROCESSOR_HEADERS,
+    )
+    assert claim_response.status_code == 409
+    assert claim_response.json()["detail"] == "job is not claimable"
+
+
 def test_discovery_idempotency_does_not_duplicate_job(api_client: TestClient) -> None:
     payload = {
         "origin_module_id": "local-connector",

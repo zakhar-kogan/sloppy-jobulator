@@ -70,6 +70,7 @@ SOURCE_POLICY_RULE_KEYS = {
 MODULE_KINDS = {"connector", "processor"}
 JOB_KINDS = {"dedupe", "extract", "enrich", "check_freshness", "resolve_url_redirects"}
 JOB_STATUSES = {"queued", "claimed", "done", "failed", "dead_letter"}
+ACTIVE_RUNTIME_JOB_KINDS = ("extract", "check_freshness", "resolve_url_redirects")
 ADMIN_JOB_FILTER_STATUSES = {"queued", "claimed", "done", "failed"}
 ADMIN_JOB_FILTER_KINDS = {"extract", "check_freshness", "resolve_url_redirects"}
 ADMIN_JOB_VISIBLE_KINDS = ("extract", "check_freshness", "resolve_url_redirects")
@@ -537,11 +538,14 @@ class PostgresRepository:
               inputs_json,
               status::text as status
             from jobs
-            where status = 'queued' and next_run_at <= now()
+            where status = 'queued'
+              and next_run_at <= now()
+              and kind::text = any($2::text[])
             order by next_run_at asc, created_at asc
             limit $1
             """,
             limit,
+            list(ACTIVE_RUNTIME_JOB_KINDS),
         )
         return [self._job_row_to_dict(row) for row in rows]
 
@@ -560,7 +564,10 @@ class PostgresRepository:
                           locked_at = now(),
                           lease_expires_at = now() + ($3::int * interval '1 second'),
                           attempt = attempt + 1
-                        where id = $1::uuid and status = 'queued' and next_run_at <= now()
+                        where id = $1::uuid
+                          and status = 'queued'
+                          and next_run_at <= now()
+                          and kind::text = any($4::text[])
                         returning
                           id::text as id,
                           kind::text as kind,
@@ -572,6 +579,7 @@ class PostgresRepository:
                         job_id,
                         module_db_id,
                         lease_seconds,
+                        list(ACTIVE_RUNTIME_JOB_KINDS),
                     )
 
                     if not row:
