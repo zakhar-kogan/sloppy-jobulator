@@ -2929,6 +2929,7 @@ class PostgresRepository:
               and ($2::text is null or kind::text = $2)
               and ($3::text is null or target_type = $3)
               and kind::text = any($6::text[])
+              and status::text = any($7::text[])
             order by updated_at desc, id desc
             limit $4
             offset $5
@@ -2939,6 +2940,7 @@ class PostgresRepository:
             limit,
             offset,
             list(ADMIN_JOB_VISIBLE_KINDS),
+            list(ADMIN_JOB_FILTER_STATUSES),
         )
         return [self._admin_job_row_to_dict(row) for row in rows]
 
