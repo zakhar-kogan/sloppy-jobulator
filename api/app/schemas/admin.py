@@ -25,8 +25,6 @@ class SourceTrustPolicyOut(BaseModel):
 class SourceTrustPolicyUpsertRequest(BaseModel):
     trust_level: ModuleTrustLevel
     auto_publish: bool
-    requires_moderation: bool
-    rules_json: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
 
 

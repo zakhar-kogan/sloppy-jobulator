@@ -131,8 +131,6 @@ export function SourceTrustPolicyAdminClient(): JSX.Element {
         body: JSON.stringify({
           trust_level: trustLevel,
           auto_publish: autoPublish,
-          requires_moderation: !autoPublish,
-          rules_json: {},
           enabled
         })
       });
