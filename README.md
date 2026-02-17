@@ -84,7 +84,8 @@ Configure branch protection to require these CI jobs:
 This keeps fast checks and DB-backed integration checks as separate required gates.
 
 On `push` to `main`, CI also runs `deploy-readiness-gate` after all quality + migration gates pass.
-When CI passes on `main`, the `Deploy` workflow can execute environment-bound deploy jobs (or be run manually via `workflow_dispatch` for staging/production).
+When that CI run succeeds, the `Deploy` workflow now auto-runs for staging from the same commit SHA.
+`Deploy` can still be run manually via `workflow_dispatch` for controlled/staged rollout options.
 
 ## Human Role Bootstrap (A3)
 
