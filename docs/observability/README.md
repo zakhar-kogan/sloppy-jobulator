@@ -45,5 +45,5 @@ bash scripts/validate-telemetry-quality.sh
 ```
 
 ## Notes
-1. `docs/ENVIRONMENT_BINDINGS.md` is the source of truth for staging/prod secret bindings used by `.github/workflows/deploy.yml`.
+1. `docs/ENVIRONMENT_BINDINGS.md` is the source of truth for the single active environment bindings used by `.github/workflows/deploy.yml`.
 2. Custom `custom.googleapis.com/sloppy_jobulator/*` metrics are expected to include `metric.labels.environment` and `metric.labels.service_name` from the OTel pipeline mapping.

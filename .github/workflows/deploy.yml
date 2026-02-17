@@ -3,13 +3,6 @@ name: Deploy
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: "Deployment environment"
-        required: true
-        type: choice
-        options:
-          - staging
-          - prod
       run_observability_import:
         description: "Optional: import dashboard/alerts after deploy"
         required: false
@@ -31,8 +24,8 @@ permissions:
   id-token: write
 
 jobs:
-  deploy-staging:
-    if: github.event.inputs.environment == 'staging'
+  deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: staging
     env:
@@ -45,7 +38,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate staging secret bindings
+      - name: Validate deploy bindings
         run: |
           required=(
             GCP_PROJECT_ID
@@ -81,10 +74,10 @@ jobs:
       - name: Deploy Web
         run: bash -lc "${SJ_DEPLOY_WEB_CMD}"
 
-      - name: Run MVP smoke (staging)
+      - name: Run MVP smoke
         env:
           SJ_API_BASE_URL: ${{ env.SJ_API_BASE_URL }}
-        run: bash scripts/mvp-smoke-staging.sh
+        run: bash scripts/mvp-smoke.sh
 
       - name: Import observability assets
         if: github.event.inputs.run_observability_import == 'true'
@@ -103,71 +96,4 @@ jobs:
           SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_STAGING }}
           SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_STAGING }}
           SJ_API_BASE_URL: ${{ secrets.SJ_API_BASE_URL_STAGING }}
-        run: bash scripts/validate-telemetry-quality.sh
-
-  deploy-prod:
-    if: github.event.inputs.environment == 'prod' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: production
-    env:
-      GCP_PROJECT_ID: ${{ secrets.SJ_GCP_PROJECT_ID_PROD }}
-      SJ_DEPLOY_API_CMD: ${{ secrets.SJ_DEPLOY_API_CMD_PROD }}
-      SJ_DEPLOY_WORKER_CMD: ${{ secrets.SJ_DEPLOY_WORKER_CMD_PROD }}
-      SJ_DEPLOY_WEB_CMD: ${{ secrets.SJ_DEPLOY_WEB_CMD_PROD }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Validate prod secret bindings
-        run: |
-          required=(
-            GCP_PROJECT_ID
-            SJ_DEPLOY_API_CMD
-            SJ_DEPLOY_WORKER_CMD
-            SJ_DEPLOY_WEB_CMD
-          )
-          for var_name in "${required[@]}"; do
-            if [ -z "${!var_name}" ]; then
-              echo "missing required binding: ${var_name}" >&2
-              exit 1
-            fi
-          done
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.SJ_GCP_WORKLOAD_IDENTITY_PROVIDER_PROD }}
-          service_account: ${{ secrets.SJ_GCP_SERVICE_ACCOUNT_PROD }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
-
-      - name: Deploy API
-        run: bash -lc "${SJ_DEPLOY_API_CMD}"
-
-      - name: Deploy Workers
-        run: bash -lc "${SJ_DEPLOY_WORKER_CMD}"
-
-      - name: Deploy Web
-        run: bash -lc "${SJ_DEPLOY_WEB_CMD}"
-
-      - name: Import observability assets
-        if: github.event.inputs.run_observability_import == 'true'
-        env:
-          SJ_OBS_ENVIRONMENT: prod
-          SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_PROD }}
-          SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_PROD }}
-          SJ_OBS_NOTIFICATION_CHANNELS: ${{ secrets.SJ_NOTIFICATION_CHANNELS_PROD }}
-          SJ_OBS_SKIP_ALERT_POLICIES: ${{ github.event.inputs.run_alert_policy_import == 'true' && 'false' || 'true' }}
-        run: bash scripts/import-observability-assets.sh
-
-      - name: Validate telemetry quality
-        if: github.event.inputs.run_telemetry_validation == 'true'
-        env:
-          SJ_OBS_ENVIRONMENT: prod
-          SJ_OBS_API_CLOUD_RUN_SERVICE: ${{ secrets.SJ_API_SERVICE_NAME_PROD }}
-          SJ_OBS_WORKER_OTEL_SERVICE: ${{ secrets.SJ_WORKER_OTEL_SERVICE_NAME_PROD }}
-          SJ_API_BASE_URL: ${{ secrets.SJ_API_BASE_URL_PROD }}
         run: bash scripts/validate-telemetry-quality.sh
