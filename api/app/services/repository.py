@@ -3117,6 +3117,10 @@ class PostgresRepository:
 
     @staticmethod
     def _module_row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
+        ingested_count = row.get("ingested_count") if hasattr(row, "get") else None
+        last_ingested_at = row.get("last_ingested_at") if hasattr(row, "get") else None
+        last_ingest_error_at = row.get("last_ingest_error_at") if hasattr(row, "get") else None
+        last_ingest_error = row.get("last_ingest_error") if hasattr(row, "get") else None
         return {
             "id": row["id"],
             "module_id": row["module_id"],
@@ -3125,10 +3129,10 @@ class PostgresRepository:
             "enabled": bool(row["enabled"]),
             "scopes": list(row["scopes"] or []),
             "trust_level": row["trust_level"],
-            "ingested_count": int(row["ingested_count"] or 0),
-            "last_ingested_at": row["last_ingested_at"],
-            "last_ingest_error_at": row["last_ingest_error_at"],
-            "last_ingest_error": row["last_ingest_error"],
+            "ingested_count": int(ingested_count or 0),
+            "last_ingested_at": last_ingested_at,
+            "last_ingest_error_at": last_ingest_error_at,
+            "last_ingest_error": last_ingest_error,
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
